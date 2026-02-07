@@ -51,6 +51,15 @@ struct GlyphData {
 @group(0) @binding(2) var<storage, read_write> characters: array<Character>;
 @group(0) @binding(3) var<storage, read> glyph_data: array<GlyphData>;
 
+@compute @workgroup_size(64)
+fn reset_signals(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let id = global_id.x;
+    if (id >= arrayLength(&nodes)) {
+        return;
+    }
+    atomicStore(&nodes[id].signals_finished, 0u);
+}
+
 struct LayoutResult {
     width: f32,
     height: f32,
@@ -144,7 +153,7 @@ fn process_node_width(id: u32) {
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
-        nodes[id].desired_width = result.width;
+        nodes[id].desired_width = max(nodes[id].style_basis, result.width);
     } else {
         var result_width = 0.0;
         let start = nodes[id].child_start_index;
@@ -158,7 +167,7 @@ fn process_node_width(id: u32) {
                 result_width += nodes[start + i].desired_width;
             }
         }
-        nodes[id].desired_width = max(nodes[id].style_min_width, result_width);
+        nodes[id].desired_width = max(nodes[id].style_basis, result_width);
     }
 }
 
@@ -170,27 +179,33 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     
-    atomicStore(&nodes[id].signals_finished, 0u);
+    // We expect signals_finished to be:
+    // 0 = Parent not done
+    // 1 = I am done processing and can signal children
 
     let parent_id = nodes[id].parent_index;
     if (parent_id == id) {
         nodes[id].final_width = uniforms.screen_width;
+        atomicStore(&nodes[id].signals_finished, 1u);
     } else {
-        // Check Parent Direction
-        if (nodes[parent_id].flex_direction == 1u) { // Column
-            // In Column, children get the parent's final width
-            nodes[id].final_width = nodes[parent_id].final_width;
-        } else { // Row
-            let parent_desired = nodes[parent_id].desired_width;
-            let parent_final = nodes[parent_id].final_width;
-            let my_desired = nodes[id].desired_width;
-            
-            if (parent_desired > 0.0) {
-                let ratio = parent_final / parent_desired;
-                nodes[id].final_width = my_desired * ratio;
-            } else {
-                nodes[id].final_width = 0.0;
+        if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
+            // Check Parent Direction
+            if (nodes[parent_id].flex_direction == 1u) { // Column
+                // In Column, children get the parent's final width
+                nodes[id].final_width = nodes[parent_id].final_width;
+            } else { // Row
+                let parent_desired = nodes[parent_id].desired_width;
+                let parent_final = nodes[parent_id].final_width;
+                let my_desired = nodes[id].desired_width;
+                
+                if (parent_desired > 0.0) {
+                    let ratio = parent_final / parent_desired;
+                    nodes[id].final_width = my_desired * ratio;
+                } else {
+                    nodes[id].final_width = 0.0;
+                }
             }
+            atomicStore(&nodes[id].signals_finished, 1u);
         }
     }
 }
@@ -258,37 +273,40 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     
-    atomicStore(&nodes[id].signals_finished, 0u);
-    nodes[id].final_height = nodes[id].desired_height;
-
     let parent_id = nodes[id].parent_index;
     
     if (parent_id == id) {
         nodes[id].final_x = 0.0;
         nodes[id].final_y = 0.0;
         nodes[id].final_height = uniforms.screen_height; 
+        atomicStore(&nodes[id].signals_finished, 1u);
     } else {
-        if (nodes[parent_id].flex_direction == 1u) { // Column
-            nodes[id].final_x = nodes[parent_id].final_x;
-            
-            var y_cursor = nodes[parent_id].final_y;
-            let start = nodes[parent_id].child_start_index;
-            
-            for (var i = start; i < id; i = i + 1u) {
-                y_cursor += nodes[i].final_height;
+        if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
+            nodes[id].final_height = nodes[id].desired_height;
+
+            if (nodes[parent_id].flex_direction == 1u) { // Column
+                nodes[id].final_x = nodes[parent_id].final_x;
+                
+                var y_cursor = nodes[parent_id].final_y;
+                let start = nodes[parent_id].child_start_index;
+                
+                for (var i = start; i < id; i = i + 1u) {
+                    y_cursor += nodes[i].desired_height;
+                }
+                nodes[id].final_y = y_cursor;
+                
+            } else { // Row
+                nodes[id].final_y = nodes[parent_id].final_y;
+                
+                var x_cursor = nodes[parent_id].final_x;
+                let start = nodes[parent_id].child_start_index;
+                
+                for (var i = start; i < id; i = i + 1u) {
+                    x_cursor += nodes[i].final_width;
+                }
+                nodes[id].final_x = x_cursor;
             }
-            nodes[id].final_y = y_cursor;
-            
-        } else { // Row
-            nodes[id].final_y = nodes[parent_id].final_y;
-            
-            var x_cursor = nodes[parent_id].final_x;
-            let start = nodes[parent_id].child_start_index;
-            
-            for (var i = start; i < id; i = i + 1u) {
-                x_cursor += nodes[i].final_width;
-            }
-            nodes[id].final_x = x_cursor;
+            atomicStore(&nodes[id].signals_finished, 1u);
         }
     }
 }

@@ -9,6 +9,7 @@ export class FlexRenderer {
 
     nodesBuffer: GPUBuffer | null = null;
     charactersBuffer: GPUBuffer | null = null;
+    pipelineResetSignals: GPUComputePipeline | null = null;
     pipelineBottomUp: GPUComputePipeline | null = null;
     pipelineTopDown: GPUComputePipeline | null = null;
     pipelineHeightBottomUp: GPUComputePipeline | null = null;
@@ -35,31 +36,37 @@ export class FlexRenderer {
         console.log("Renderer Initialized");
         
         // 1. Setup Scene
-        // Hierarchy:
-        // Root (Column)
-        //  -> Row 1 (Row)
-        //      -> Text 1
-        //      -> Text 2
-        //  -> Row 2 (Row)
-        //      -> Text 3
-        //      -> Text 4
+        // Grand Root (Index 0) - Row Direction (Sidebar + Main Content)
+        const grandRoot = this.engine.add_node(800.0); 
+        this.engine.set_flex_direction(grandRoot, 0); // 0 = Row
 
-        // Root Node (Index 0) - Column Direction
-        const root = this.engine.add_node(800.0); 
-        this.engine.set_flex_direction(root, 1); // 1 = Column
+        // Sidebar (Index 1) - Left Column
+        const sidebar = this.engine.add_node(200.0);
+        this.engine.set_text(sidebar, "SIDEBAR\n\nDashboard\nAnalytics\nCustomers\nSettings\n\nStatus: OK");
+        this.engine.set_parent(sidebar, grandRoot);
 
-        // Row 1 (Index 1) - Row Direction
+        // Main Content (Index 2) - Right Column (Column Direction)
+        const mainContent = this.engine.add_node(0.0); 
+        this.engine.set_flex_direction(mainContent, 1); // 1 = Column
+        this.engine.set_parent(mainContent, grandRoot);
+
+        // Set Grand Root Children (Sidebar, Main Content)
+        this.engine.set_child_start(grandRoot, 1);
+
+        // --- Content Area Below ---
+
+        // Row 1 (Index 3) - Row Direction
         const row1 = this.engine.add_node(0.0);
-        this.engine.set_parent(row1, root);
+        this.engine.set_parent(row1, mainContent);
 
-        // Row 2 (Index 2) - Row Direction
+        // Row 2 (Index 4) - Row Direction
         const row2 = this.engine.add_node(0.0);
-        this.engine.set_parent(row2, root);
+        this.engine.set_parent(row2, mainContent);
 
-        // Set Root Children (Row 1, Row 2)
-        this.engine.set_child_start(root, 1); // Children start at index 1
+        // Set mainContent Children (Row 1, Row 2)
+        this.engine.set_child_start(mainContent, 3); // Children start at index 3
 
-        // Content for Row 1 (Indices 3, 4)
+        // Content for Row 1 (Indices 5, 6)
         const t1 = this.engine.add_node(0.0);
         this.engine.set_text(t1, "Row 1 - Item A: This is a much longer sentence designed to test the wrapping capabilities of our GPU renderer. It should span multiple lines if everything is working correctly.");
         this.engine.set_parent(t1, row1);
@@ -68,9 +75,9 @@ export class FlexRenderer {
         this.engine.set_text(t2, "Row 1 - Item B: This is also a significant amount of text to ensure that we have proper distribution of space between these two items in the first row.");
         this.engine.set_parent(t2, row1);
         
-        this.engine.set_child_start(row1, 3); // Children start at index 3
+        this.engine.set_child_start(row1, 5); // Children start at index 5
 
-        // Content for Row 2 (Indices 5, 6)
+        // Content for Row 2 (Indices 7, 8)
         const t3 = this.engine.add_node(0.0);
         this.engine.set_text(t3, "Row 2 - Item C: This third block of text is in the second row, which should appear below the first row. It also needs to be long enough to wrap.");
         this.engine.set_parent(t3, row2);
@@ -79,7 +86,7 @@ export class FlexRenderer {
         this.engine.set_text(t4, "Row 2 - Item D: Finally, this is the last block of text. By making all of these sentences longer, we stress test the line breaking algorithms in the compute shader.");
         this.engine.set_parent(t4, row2);
         
-        this.engine.set_child_start(row2, 5); // Children start at index 5
+        this.engine.set_child_start(row2, 7); // Children start at index 7
         
         // 2. Buffers
         const nodeCount = this.engine.get_node_count();
@@ -214,6 +221,11 @@ export class FlexRenderer {
             bindGroupLayouts: [bindGroupLayoutRender]
         });
 
+        this.pipelineResetSignals = this.device.createComputePipeline({
+            layout: pipelineLayoutCompute,
+            compute: { module: moduleCompute, entryPoint: 'reset_signals' }
+        });
+
         this.pipelineBottomUp = this.device.createComputePipeline({
             layout: pipelineLayoutCompute,
             compute: { module: moduleCompute, entryPoint: 'width_bottom_up' }
@@ -259,13 +271,7 @@ export class FlexRenderer {
             fragment: {
                 module: moduleVisual,
                 entryPoint: 'fs_text',
-                targets: [{ 
-                    format: navigator.gpu.getPreferredCanvasFormat(),
-                    blend: {
-                        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-                        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
-                    }
-                }],
+                targets: [{ format: navigator.gpu.getPreferredCanvasFormat() }],
             },
             primitive: {
                 topology: 'triangle-list',
@@ -341,26 +347,50 @@ export class FlexRenderer {
         pass1.dispatchWorkgroups(workgroups);
         pass1.end();
 
-        // Pass 2: Width Top-Down
-        const pass2 = commandEncoder.beginComputePass();
-        pass2.setBindGroup(0, this.bindGroupCompute!);
-        pass2.setPipeline(this.pipelineTopDown!);
-        pass2.dispatchWorkgroups(workgroups);
-        pass2.end();
+        // Pass 2: Reset Signals for Width Top-Down
+        const passResetWidth = commandEncoder.beginComputePass();
+        passResetWidth.setBindGroup(0, this.bindGroupCompute!);
+        passResetWidth.setPipeline(this.pipelineResetSignals!);
+        passResetWidth.dispatchWorkgroups(workgroups);
+        passResetWidth.end();
 
-        // Pass 3: Height Bottom-Up
+        // Pass 2: Width Top-Down (Multiple iterations to resolve levels)
+        for (let i = 0; i < 8; i++) {
+            const pass2 = commandEncoder.beginComputePass();
+            pass2.setBindGroup(0, this.bindGroupCompute!);
+            pass2.setPipeline(this.pipelineTopDown!);
+            pass2.dispatchWorkgroups(workgroups);
+            pass2.end();
+        }
+
+        // Pass 3: Reset Signals for Height Pass
+        const passResetHeight = commandEncoder.beginComputePass();
+        passResetHeight.setBindGroup(0, this.bindGroupCompute!);
+        passResetHeight.setPipeline(this.pipelineResetSignals!);
+        passResetHeight.dispatchWorkgroups(workgroups);
+        passResetHeight.end();
+
+        // Pass 4: Height Bottom-Up
         const pass3 = commandEncoder.beginComputePass();
         pass3.setBindGroup(0, this.bindGroupCompute!);
         pass3.setPipeline(this.pipelineHeightBottomUp!);
         pass3.dispatchWorkgroups(workgroups);
         pass3.end();
 
-        // Pass 4: Final Layout
-        const pass4 = commandEncoder.beginComputePass();
-        pass4.setBindGroup(0, this.bindGroupCompute!);
-        pass4.setPipeline(this.pipelineFinalLayout!);
-        pass4.dispatchWorkgroups(workgroups);
-        pass4.end();
+        // Pass 5: Final Layout (Reset Signals first)
+        const passResetFinal = commandEncoder.beginComputePass();
+        passResetFinal.setBindGroup(0, this.bindGroupCompute!);
+        passResetFinal.setPipeline(this.pipelineResetSignals!);
+        passResetFinal.dispatchWorkgroups(workgroups);
+        passResetFinal.end();
+
+        for (let i = 0; i < 8; i++) {
+            const pass4 = commandEncoder.beginComputePass();
+            pass4.setBindGroup(0, this.bindGroupCompute!);
+            pass4.setPipeline(this.pipelineFinalLayout!);
+            pass4.dispatchWorkgroups(workgroups);
+            pass4.end();
+        }
 
         // 4. Render Pass
         const renderPass = commandEncoder.beginRenderPass({
