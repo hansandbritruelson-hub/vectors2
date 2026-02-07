@@ -105,6 +105,80 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color, 1.0);
 }
 
+fn solve_cubic(a: f32, b: f32, c: f32) -> vec3<f32> {
+    let p = b - a * a / 3.0;
+    let p3 = p * p * p;
+    let q = a * (2.0 * a * a - 9.0 * b) / 27.0 + c;
+    let d = q * q + 4.0 * p3 / 27.0;
+    let offset = -a / 3.0;
+    
+    if (d > 0.0) {
+        let z = sqrt(d);
+        let u = (-q + z) / 2.0;
+        let v = (-q - z) / 2.0;
+        let u1 = sign(u) * pow(abs(u), 1.0/3.0);
+        let v1 = sign(v) * pow(abs(v), 1.0/3.0);
+        return vec3<f32>(u1 + v1 + offset, -1.0, -1.0);
+    } else if (d == 0.0) {
+        let u = -q / 2.0;
+        let u1 = sign(u) * pow(abs(u), 1.0/3.0);
+        return vec3<f32>(2.0 * u1 + offset, -u1 + offset, -1.0);
+    } else {
+        let u = sqrt(-p / 3.0);
+        let v = acos(-sqrt(-27.0 / p3) * q / 2.0) / 3.0;
+        let m = cos(v);
+        let n = sin(v) * 1.732050808;
+        return vec3<f32>(2.0 * u * m + offset, -u * (m + n) + offset, -u * (m - n) + offset);
+    }
+}
+
+fn sd_bezier_sq(pos: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>) -> f32 {
+    let A = p1 - p0;
+    let B = p0 - 2.0 * p1 + p2;
+    let C = p0 - pos;
+
+    let dotBB = dot(B, B);
+
+    if (dotBB < 0.0001) {
+        let v = p2 - p0;
+        let w = pos - p0;
+        let c1 = dot(w, v);
+        let c2 = dot(v, v);
+        let b = clamp(c1 / c2, 0.0, 1.0);
+        let dist = distance(pos, p0 + b * v);
+        return dist * dist;
+    }
+
+    let k = 1.0 / dotBB;
+    let c2 = 3.0 * dot(A, B) * k;
+    let c1 = (2.0 * dot(A, A) + dot(C, B)) * k;
+    let c0 = dot(C, A) * k;
+    
+    let roots = solve_cubic(c2, c1, c0);
+    
+    var min_d2 = dot(C, C);
+    let d2_at_1 = dot(p2 - pos, p2 - pos);
+    min_d2 = min(min_d2, d2_at_1);
+
+    if (roots.x > 0.0 && roots.x < 1.0) {
+        let t = roots.x;
+        let q = C + 2.0 * t * A + t * t * B;
+        min_d2 = min(min_d2, dot(q, q));
+    }
+    if (roots.y > 0.0 && roots.y < 1.0) {
+        let t = roots.y;
+        let q = C + 2.0 * t * A + t * t * B;
+        min_d2 = min(min_d2, dot(q, q));
+    }
+    if (roots.z > 0.0 && roots.z < 1.0) {
+        let t = roots.z;
+        let q = C + 2.0 * t * A + t * t * B;
+        min_d2 = min(min_d2, dot(q, q));
+    }
+    
+    return min_d2;
+}
+
 @vertex
 fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VertexOutput {
     let char = characters[instance_index];
@@ -158,6 +232,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     // Winding Number Algorithm
     // Ray Cast to the Right (+X direction)
     var winding = 0;
+    var min_dist_sq = 1e20; // Init to large value
     
     for (var i = 0u; i < count; i = i + 1u) {
         let curve = curves[start + i];
@@ -165,6 +240,13 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
         let p1 = curve.p1;
         let p2 = curve.p2;
         
+        // 1. Distance Calculation (True Distance)
+        let d2 = sd_bezier_sq(p, p0, p1, p2);
+        if (d2 < min_dist_sq) {
+            min_dist_sq = d2;
+        }
+
+        // 2. Winding Number Logic (Ray to right)
         // Solve Intersection: Curve Y = p.y
         // Bezier Y(t) = (1-t)^2 y0 + 2(1-t)t y1 + t^2 y2
         // A t^2 + B t + C = 0
@@ -198,10 +280,6 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
             }
         }
         
-        // Check roots
-        // Note: we can optimize loop by skipping if y range doesn't cover p.y
-        // But for brute force, just check t.
-        
         if (num_roots > 0) {
             check_intersection(t0, p, p0, p1, p2, &winding);
         }
@@ -210,12 +288,39 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     
+    let dist = sqrt(min_dist_sq);
+    
+    // Signed Distance: Negative if inside (winding != 0), Positive if outside
+    // Actually, traditionally SDF is negative inside.
+    // Let's assume winding != 0 means inside.
+    
+    var sd = dist;
     if (winding != 0) {
-        return vec4<f32>(in.color, 1.0);
-    } else {
+        sd = -dist;
+    }
+    
+    // Anti-Aliasing
+    // screen pixel range is roughly 0.5 to 1.0 depending on preference.
+    // Using fwidth on dist is theoretically better for scale independence,
+    // but since we are computing in pixel space (initially), 0.5 is fine.
+    // Actually, local_pos scale depends on vertex shader.
+    // vs_text: out.local_pos = corner; corner is in Layout Units (pixels).
+    // If dpr=2, then 1 layout unit = 2 physical pixels.
+    // fwidth(dist) will be approx 1.0/dpr? or just magnitude of gradient?
+    // Let's use fwidth to be safe against scaling.
+    
+    // fwidth requires uniform flow control, but we are after the loop.
+    let afwidth = fwidth(dist);
+    let alpha = 1.0 - smoothstep(-afwidth, afwidth, sd); 
+    
+    // Use standard 0.5 for crispness if fwidth is weird (e.g. constant regions)
+    // let alpha = 1.0 - smoothstep(-0.5, 0.5, sd);
+
+    if (alpha <= 0.0) {
         discard;
     }
-    return vec4<f32>(0.0); // Unreachable
+    
+    return vec4<f32>(in.color, alpha);
 }
 
 fn check_intersection(t: f32, p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, winding: ptr<function, i32>) {
