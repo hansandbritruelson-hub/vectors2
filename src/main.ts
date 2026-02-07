@@ -1,6 +1,9 @@
 import { FlexRenderer } from './renderer';
+import initWasm from 'renderer-core';
 
 const init = async () => {
+    await initWasm();
+
     if (!navigator.gpu) {
         document.body.innerHTML = "WebGPU not supported.";
         return;

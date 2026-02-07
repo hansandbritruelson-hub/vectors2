@@ -13,19 +13,32 @@ struct Node {
     child_start_index: u32,
     child_count: u32,
     signals_finished: atomic<u32>,
+    text_start: u32,
     text_length: u32,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
 };
 
-@group(0) @binding(0) var<storage, read_write> nodes: array<Node>;
+struct Character {
+    value: u32,
+    prev: u32,
+    next: u32,
+    node_index: u32,
+
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+};
 
 struct Uniforms {
     screen_width: f32,
     screen_height: f32,
 };
+
+@group(0) @binding(0) var<storage, read_write> nodes: array<Node>;
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
+@group(0) @binding(2) var<storage, read_write> characters: array<Character>;
 
 // PASS 1: Intrinsic Width (Bottom-Up)
 @compute @workgroup_size(64)
@@ -141,13 +154,42 @@ fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 fn process_node_height(id: u32) {
     let count = nodes[id].child_count;
     if (count == 0u) {
-        // Intrinsic height based on wrapping text
+        // Layout text characters
         let char_width = 10.0;
         let line_height = 20.0;
-        let total_content_width = f32(nodes[id].text_length) * char_width;
-        let width = max(char_width, nodes[id].final_width);
-        let num_lines = ceil(total_content_width / width);
-        nodes[id].desired_height = max(line_height, num_lines * line_height);
+        let max_width = max(char_width, nodes[id].final_width);
+        
+        let start = nodes[id].text_start;
+        let len = nodes[id].text_length;
+        
+        var cur_x = 0.0;
+        var cur_y = 0.0;
+        
+        for (var i = 0u; i < len; i = i + 1u) {
+            let idx = start + i;
+            
+            // Wrap if adding this char would exceed width
+            // (Assumes char fits on its own line if width < char_width, but we took max above)
+            if (cur_x + char_width > max_width + 0.1) { // Epsilon for float issues
+                 cur_x = 0.0;
+                 cur_y += line_height;
+            }
+            
+            characters[idx].x = cur_x;
+            characters[idx].y = cur_y;
+            // Ensure dimensions are set, though init set them too
+            characters[idx].width = char_width; 
+            characters[idx].height = line_height;
+            
+            cur_x += char_width;
+        }
+        
+        // Total height calculation
+        if (len > 0u) {
+            nodes[id].desired_height = cur_y + line_height;
+        } else {
+             nodes[id].desired_height = 0.0;
+        }
     } else {
         var max_height = 0.0;
         let start = nodes[id].child_start_index;
