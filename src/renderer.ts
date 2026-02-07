@@ -305,7 +305,17 @@ export class FlexRenderer {
         // In CSS space, 400 is center. In Physical space, 800 is center.
         // So it matches!
         const dpr = window.devicePixelRatio || 1;
-        const uniformData = new Float32Array([canvas.width / dpr, canvas.height / dpr, 0, 0]);
+        const ascender = this.engine.get_ascender();
+        const descender = this.engine.get_descender();
+        const lineGap = this.engine.get_line_gap();
+        const lineHeight = ascender - descender + lineGap;
+        
+        const uniformData = new Float32Array([
+            canvas.width / dpr, 
+            canvas.height / dpr, 
+            ascender,
+            lineHeight
+        ]);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
 
         // 2. Update Nodes
@@ -456,7 +466,7 @@ export class FlexRenderer {
                 // Inspect First Char
                 const firstBase = textStart * 8;
                 const glyphIndex = charsU32[firstBase + 1];
-                console.log(`  First Char Info: GlyphID ${glyphIndex}, Width ${charsData[firstBase+6]}`);
+                console.log(`  First Char Info: GlyphID ${glyphIndex}, Width ${charsData[firstBase+6]}, BearingY ${charsData[firstBase+5]}`);
                 
                 // Lookup GlyphInfo
                 const infoBase = glyphIndex * 4; // 4 u32s

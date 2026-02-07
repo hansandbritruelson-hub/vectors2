@@ -50,6 +50,8 @@ struct GlyphInfo {
 struct Uniforms {
     screen_width: f32,
     screen_height: f32,
+    font_ascender: f32,
+    line_height: f32,
 };
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> characters: array<Character>;

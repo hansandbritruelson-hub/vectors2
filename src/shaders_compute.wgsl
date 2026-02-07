@@ -34,11 +34,14 @@ struct Character {
 struct Uniforms {
     screen_width: f32,
     screen_height: f32,
+    font_ascender: f32,
+    line_height: f32,
 };
 
 struct GlyphData {
     advance: f32,
     bearing_x: f32,
+    bearing_y: f32,
     width: f32,
     height: f32,
 };
@@ -56,8 +59,8 @@ struct LayoutResult {
 fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult {
     let start = nodes[node_id].text_start;
     let len = nodes[node_id].text_length;
-    let font_size_scale = 1.0; // Assume metrics are pre-scaled or this is 1.0
-    let line_height = 24.0; // Based on font size
+    let line_height = uniforms.line_height;
+    let font_ascender = uniforms.font_ascender;
     
     var cursor_x = 0.0;
     var cursor_y = 0.0;
@@ -74,7 +77,6 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
         let glyph_idx = char.glyph_index; 
         
         let glyph = glyph_data[glyph_idx];
-        
         let advance = glyph.advance;
         
         // Word wrap check
@@ -85,7 +87,9 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
         
         if (write_output) {
             characters[idx].x = cursor_x + glyph.bearing_x;
-            characters[idx].y = cursor_y; 
+            // The top of the character's bounding box is at:
+            // Line Top + Ascenter - BearingY
+            characters[idx].y = cursor_y + font_ascender - glyph.bearing_y; 
             characters[idx].width = glyph.width;
             characters[idx].height = glyph.height;
         }

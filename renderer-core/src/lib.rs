@@ -146,6 +146,7 @@ impl OutlineBuilder for PathCollector {
 pub struct GlyphData {
     pub advance: f32,
     pub bearing_x: f32,
+    pub bearing_y: f32,
     pub width: f32,   // Bounding box width
     pub height: f32,  // Bounding box height
 }
@@ -251,6 +252,11 @@ pub struct FlexEngine {
     // New GPU Vector Graphics Data
     curves: Vec<GpuCurve>,
     glyph_infos: Vec<GpuGlyphInfo>,
+
+    // Font Metrics
+    pub ascender: f32,
+    pub descender: f32,
+    pub line_gap: f32,
     
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
@@ -269,6 +275,9 @@ impl FlexEngine {
             kerning_table: Vec::new(),
             curves: Vec::new(),
             glyph_infos: Vec::new(),
+            ascender: 0.0,
+            descender: 0.0,
+            line_gap: 0.0,
             face: None,
         };
         
@@ -282,27 +291,18 @@ impl FlexEngine {
         let units_per_em = face.units_per_em() as f32;
         let font_size = 24.0; // Fixed 24px font size for now
         let scale = font_size / units_per_em;
+
+        self.ascender = face.ascender() as f32 * scale;
+        self.descender = face.descender() as f32 * scale;
+        self.line_gap = face.line_gap() as f32 * scale;
         
         log(&format!("Font loaded. UnitsPerEm: {}, Scale: {}", units_per_em, scale));
+        log(&format!("Metrics: Ascender: {}, Descender: {}, LineGap: {}", self.ascender, self.descender, self.line_gap));
         
         // Resize glyph_data to num_glyphs
         let num_glyphs = face.number_of_glyphs();
         self.glyph_data.reserve(num_glyphs as usize);
         self.glyph_infos.reserve(num_glyphs as usize);
-        
-        let path_scale = 1.0 / units_per_em; // Normalize to 0..1 relative to em size? 
-        // Actually, let's keep it in "Font Units" but scaled to pixel size (24px) like layouts?
-        // Or normalized to 0..1 range? 
-        // Layout uses "scale" (0.0117..). BBox is in pixels.
-        // Code below uses `scale`.
-        // Let's normalize curves to be within [0.0, 1.0] relative to bounding box? No, that's hard shader side.
-        // Let's use the same scale as the layout. So curves are in "Pixels".
-        // BUT, shader will be in "Local Space" of the quad. 
-        // Quad size is glyph.width x glyph.height.
-        // Glyph origin is (0,0) at bottom-left? FreeType origin is (0,0) at baseline. 
-        // If we emit curves in pixels relative to (0,0), bbox.x_min as f32, bbox.y_max as f32 baseline, the shader must shift/scale.
-        
-        // Let's use the same scale as GlyphData.
         
         for id in 0..num_glyphs {
             let gid = GlyphId(id);
@@ -327,6 +327,7 @@ impl FlexEngine {
             self.glyph_data.push(GlyphData {
                 advance,
                 bearing_x: bbox.x_min as f32 * scale,
+                bearing_y: bbox.y_max as f32 * scale,
                 width: (bbox.x_max - bbox.x_min) as f32 * scale,
                 height: (bbox.y_max - bbox.y_min) as f32 * scale,
             });
@@ -476,6 +477,18 @@ impl FlexEngine {
         unsafe {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
         }
+    }
+
+    pub fn get_ascender(&self) -> f32 {
+        self.ascender
+    }
+
+    pub fn get_descender(&self) -> f32 {
+        self.descender
+    }
+
+    pub fn get_line_gap(&self) -> f32 {
+        self.line_gap
     }
 
     
