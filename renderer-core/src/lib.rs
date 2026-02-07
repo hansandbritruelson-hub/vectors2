@@ -53,7 +53,8 @@ pub struct Node {
     pub signals_finished: u32, // Atomic counter for Bottom-Up
     pub text_start: u32,       // Index into character buffer
     pub text_length: u32,      // Length of the text content
-    pub _padding: [u32; 2],    // Maintain 16-byte alignment (48 + 16 = 64 bytes)
+    pub flex_direction: u32,   // 0 = Row, 1 = Column
+    pub _padding: u32,         // Maintain 16-byte alignment
 }
 
 impl Node {
@@ -73,7 +74,8 @@ impl Node {
             signals_finished: 0,
             text_start: 0,
             text_length: 0,
-            _padding: [0; 2],
+            flex_direction: 0,
+            _padding: 0,
         }
     }
 }
@@ -193,6 +195,12 @@ impl FlexEngine {
     pub fn set_child_start(&mut self, parent_index: u32, start_index: u32) {
         if (parent_index as usize) < self.nodes.len() {
             self.nodes[parent_index as usize].child_start_index = start_index;
+        }
+    }
+    
+    pub fn set_flex_direction(&mut self, node_index: u32, direction: u32) {
+        if (node_index as usize) < self.nodes.len() {
+            self.nodes[node_index as usize].flex_direction = direction;
         }
     }
 
