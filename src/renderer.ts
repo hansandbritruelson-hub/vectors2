@@ -19,13 +19,11 @@ export class FlexRenderer {
     bindGroupCompute: GPUBindGroup | null = null;
     bindGroupRender: GPUBindGroup | null = null;
     uniformBuffer: GPUBuffer | null = null;
+    glyphBuffer: GPUBuffer | null = null;
     
-    fontTexture: GPUTexture | null = null;
-    fontSampler: GPUSampler | null = null;
-    fontAtlasWidth = 512;
-    fontAtlasHeight = 512;
-    fontCharWidth = 32;
-    fontCharHeight = 64;
+    // Vector Graphics Buffers
+    curveBuffer: GPUBuffer | null = null;
+    glyphInfoBuffer: GPUBuffer | null = null;
 
     constructor(device: GPUDevice, context: GPUCanvasContext) {
         this.device = device;
@@ -33,90 +31,56 @@ export class FlexRenderer {
         this.engine = new FlexEngine();
     }
 
-    createFontAtlas() {
-        // Create an offscreen canvas to draw characters
-        const canvas = document.createElement('canvas');
-        canvas.width = this.fontAtlasWidth;
-        canvas.height = this.fontAtlasHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-
-        // Background
-        ctx.fillStyle = 'rgba(0,0,0,0)'; // Transparent
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Font Config
-        ctx.font = '48px monospace';
-        ctx.fillStyle = 'white';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        const cols = this.fontAtlasWidth / this.fontCharWidth;
-        const rows = this.fontAtlasHeight / this.fontCharHeight;
-
-        // ASCII 32 to 126
-        for (let i = 32; i < 127; i++) {
-            const index = i - 32;
-            const col = index % cols;
-            const row = Math.floor(index / cols);
-            const x = col * this.fontCharWidth;
-            const y = row * this.fontCharHeight;
-            
-            // Draw char centered in the cell
-            const char = String.fromCharCode(i);
-            ctx.fillText(char, x + this.fontCharWidth/2, y + this.fontCharHeight/2);
-            
-            // Debug border (optional, comment out for cleaner look)
-            // ctx.strokeStyle = 'red';
-            // ctx.strokeRect(x, y, this.fontCharWidth, this.fontCharHeight);
-        }
-
-        // Create GPU Texture
-        this.fontTexture = this.device.createTexture({
-            size: [this.fontAtlasWidth, this.fontAtlasHeight, 1],
-            format: 'rgba8unorm',
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-        });
-
-        this.device.queue.copyExternalImageToTexture(
-            { source: canvas },
-            { texture: this.fontTexture },
-            [this.fontAtlasWidth, this.fontAtlasHeight]
-        );
-
-        this.fontSampler = this.device.createSampler({
-            magFilter: 'linear',
-            minFilter: 'linear',
-        });
-        
-        console.log("Font Atlas Created and Uploaded");
-    }
-
     async init() {
         console.log("Renderer Initialized");
         
-        // 1. Setup Scene with 4 nodes containing sentences
-        // Using a wider basis (800.0) so text doesn't wrap immediately at 5 chars (5 * 10px = 50px < 100px)
-        const root = this.engine.add_node(800.0); // Root (0)
-        
-        const sentences = [
-            "This is the first sentence that will be rendered in a div.",
-            "Here is another sentence, slightly longer than the first one to test wrapping.",
-            "Short sentence.",
-            "Building a GPU-accelerated flexbox renderer is quite an interesting challenge for WebGPU and Rust."
-        ];
+        // 1. Setup Scene
+        // Hierarchy:
+        // Root (Column)
+        //  -> Row 1 (Row)
+        //      -> Text 1
+        //      -> Text 2
+        //  -> Row 2 (Row)
+        //      -> Text 3
+        //      -> Text 4
 
-        for (let i = 0; i < sentences.length; i++) {
-            const childIdx = this.engine.add_node(0.0);
-            this.engine.set_text(childIdx, sentences[i]);
-            this.engine.set_parent(childIdx, root);
-        }
-        
-        this.engine.set_child_start(root, 1);
-        
-        // Generate Atlas
-        this.createFontAtlas();
+        // Root Node (Index 0) - Column Direction
+        const root = this.engine.add_node(800.0); 
+        this.engine.set_flex_direction(root, 1); // 1 = Column
 
+        // Row 1 (Index 1) - Row Direction
+        const row1 = this.engine.add_node(0.0);
+        this.engine.set_parent(row1, root);
+
+        // Row 2 (Index 2) - Row Direction
+        const row2 = this.engine.add_node(0.0);
+        this.engine.set_parent(row2, root);
+
+        // Set Root Children (Row 1, Row 2)
+        this.engine.set_child_start(root, 1); // Children start at index 1
+
+        // Content for Row 1 (Indices 3, 4)
+        const t1 = this.engine.add_node(0.0);
+        this.engine.set_text(t1, "Row 1 - Item A: This is a much longer sentence designed to test the wrapping capabilities of our GPU renderer. It should span multiple lines if everything is working correctly.");
+        this.engine.set_parent(t1, row1);
+
+        const t2 = this.engine.add_node(0.0);
+        this.engine.set_text(t2, "Row 1 - Item B: This is also a significant amount of text to ensure that we have proper distribution of space between these two items in the first row.");
+        this.engine.set_parent(t2, row1);
+        
+        this.engine.set_child_start(row1, 3); // Children start at index 3
+
+        // Content for Row 2 (Indices 5, 6)
+        const t3 = this.engine.add_node(0.0);
+        this.engine.set_text(t3, "Row 2 - Item C: This third block of text is in the second row, which should appear below the first row. It also needs to be long enough to wrap.");
+        this.engine.set_parent(t3, row2);
+
+        const t4 = this.engine.add_node(0.0);
+        this.engine.set_text(t4, "Row 2 - Item D: Finally, this is the last block of text. By making all of these sentences longer, we stress test the line breaking algorithms in the compute shader.");
+        this.engine.set_parent(t4, row2);
+        
+        this.engine.set_child_start(row2, 5); // Children start at index 5
+        
         // 2. Buffers
         const nodeCount = this.engine.get_node_count();
         const nodeSize = this.engine.get_node_size();
@@ -139,11 +103,49 @@ export class FlexRenderer {
             const charData = this.engine.get_characters_buffer();
             this.device.queue.writeBuffer(this.charactersBuffer, 0, charData.buffer, charData.byteOffset, charData.byteLength);
         }
+
+        const glyphCount = this.engine.get_glyph_data_count();
+        const glyphSize = this.engine.get_glyph_data_size();
+        
+        this.glyphBuffer = this.device.createBuffer({
+            size: Math.max(glyphCount * glyphSize, 4),
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
+        if (glyphCount > 0) {
+            const glyphData = this.engine.get_glyph_data_buffer();
+            this.device.queue.writeBuffer(this.glyphBuffer, 0, glyphData.buffer, glyphData.byteOffset, glyphData.byteLength);
+        }
         
         this.uniformBuffer = this.device.createBuffer({
             size: 16, 
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
+
+        // Vectors
+        const curveData = this.engine.get_curve_buffer();
+        console.log(`[JS] Curve Data Size: ${curveData.byteLength} bytes`);
+        this.curveBuffer = this.device.createBuffer({
+            size: Math.max(curveData.byteLength, 4), // 8 floats = 32 bytes per curve
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+        });
+        if (curveData.byteLength > 0) {
+           this.device.queue.writeBuffer(this.curveBuffer, 0, curveData.buffer, curveData.byteOffset, curveData.byteLength);
+        } else {
+           console.warn("[JS] Curve buffer is empty!");
+        }
+
+        const glyphInfoData = this.engine.get_glyph_info_buffer();
+        console.log(`[JS] Glyph Info Size: ${glyphInfoData.byteLength} bytes`);
+        this.glyphInfoBuffer = this.device.createBuffer({
+            size: Math.max(glyphInfoData.byteLength, 4), // 4 u32s = 16 bytes per glyph
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+        });
+        if (glyphInfoData.byteLength > 0) {
+            this.device.queue.writeBuffer(this.glyphInfoBuffer, 0, glyphInfoData.buffer, glyphInfoData.byteOffset, glyphInfoData.byteLength);
+        } else {
+            console.warn("[JS] Glyph Info buffer is empty!");
+        }
 
         // 3. Pipelines
         const moduleCompute = this.device.createShaderModule({ code: shaderCompute });
@@ -165,6 +167,11 @@ export class FlexRenderer {
                     binding: 2,
                     visibility: GPUShaderStage.COMPUTE,
                     buffer: { type: 'storage' }
+                },
+                {
+                    binding: 3,
+                    visibility: GPUShaderStage.COMPUTE,
+                    buffer: { type: 'read-only-storage' }
                 }
             ]
         });
@@ -184,17 +191,17 @@ export class FlexRenderer {
                 {
                     binding: 2,
                     visibility: GPUShaderStage.VERTEX,
-                    buffer: { type: 'read-only-storage' }
+                    buffer: { type: 'read-only-storage' } // characters
                 },
                 {
                     binding: 3,
                     visibility: GPUShaderStage.FRAGMENT,
-                    texture: {}
+                    buffer: { type: 'read-only-storage' } // curves
                 },
                 {
                     binding: 4,
                     visibility: GPUShaderStage.FRAGMENT,
-                    sampler: {}
+                    buffer: { type: 'read-only-storage' } // glyph_infos
                 }
             ]
         });
@@ -265,7 +272,8 @@ export class FlexRenderer {
             entries: [
                 { binding: 0, resource: { buffer: this.nodesBuffer } },
                 { binding: 1, resource: { buffer: this.uniformBuffer } },
-                { binding: 2, resource: { buffer: this.charactersBuffer } }
+                { binding: 2, resource: { buffer: this.charactersBuffer } },
+                { binding: 3, resource: { buffer: this.glyphBuffer } }
             ]
         });
 
@@ -275,8 +283,8 @@ export class FlexRenderer {
                 { binding: 0, resource: { buffer: this.nodesBuffer } },
                 { binding: 1, resource: { buffer: this.uniformBuffer } },
                 { binding: 2, resource: { buffer: this.charactersBuffer } },
-                { binding: 3, resource: this.fontTexture!.createView() },
-                { binding: 4, resource: this.fontSampler! }
+                { binding: 3, resource: { buffer: this.curveBuffer! } },
+                { binding: 4, resource: { buffer: this.glyphInfoBuffer! } }
             ]
         });
     }
@@ -286,7 +294,18 @@ export class FlexRenderer {
 
         // 1. Update Uniforms
         const canvas = this.context.canvas as HTMLCanvasElement;
-        const uniformData = new Float32Array([canvas.width, canvas.height, 0, 0]);
+        // The shader expects "Screen CSS Pixels" if we want to map layout units (CSS px) to NDC directly.
+        // But the viewport is set to the full physical texture size.
+        // We pass the logical size so that 1 layout unit = 1 pixel on screen (roughly).
+        // Actually, let's pass the physical size, and rely on the fact that our layouts 
+        // need to be scaled by DPR for crisp rendering, OR we pass logical size.
+        // If we pass Logical Size (e.g. 800) and Vertex is at 400. 400/800 = 0.5 (NDC 0.0 center).
+        // Viewport is 0..1600. Center is 800.
+        // So the object appears at pixel 800.
+        // In CSS space, 400 is center. In Physical space, 800 is center.
+        // So it matches!
+        const dpr = window.devicePixelRatio || 1;
+        const uniformData = new Float32Array([canvas.width / dpr, canvas.height / dpr, 0, 0]);
         this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
 
         // 2. Update Nodes
@@ -356,7 +375,7 @@ export class FlexRenderer {
     }
 
     async debug() {
-        if (!this.nodesBuffer || !this.charactersBuffer) return;
+        if (!this.nodesBuffer || !this.charactersBuffer || !this.curveBuffer || !this.glyphInfoBuffer) return;
         
         const readBufferNodes = this.device.createBuffer({
             size: this.nodesBuffer.size,
@@ -368,14 +387,30 @@ export class FlexRenderer {
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
 
+        // Debug Vector Buffers
+        const readBufferCurves = this.device.createBuffer({
+            size: this.curveBuffer.size,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+        
+        const readBufferInfos = this.device.createBuffer({
+            size: this.glyphInfoBuffer.size,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+
         const commandEncoder = this.device.createCommandEncoder();
         commandEncoder.copyBufferToBuffer(this.nodesBuffer, 0, readBufferNodes, 0, readBufferNodes.size);
         commandEncoder.copyBufferToBuffer(this.charactersBuffer, 0, readBufferChars, 0, readBufferChars.size);
+        commandEncoder.copyBufferToBuffer(this.curveBuffer, 0, readBufferCurves, 0, readBufferCurves.size);
+        commandEncoder.copyBufferToBuffer(this.glyphInfoBuffer, 0, readBufferInfos, 0, readBufferInfos.size);
+        
         this.device.queue.submit([commandEncoder.finish()]);
 
         await Promise.all([
             readBufferNodes.mapAsync(GPUMapMode.READ),
-            readBufferChars.mapAsync(GPUMapMode.READ)
+            readBufferChars.mapAsync(GPUMapMode.READ),
+            readBufferCurves.mapAsync(GPUMapMode.READ),
+            readBufferInfos.mapAsync(GPUMapMode.READ)
         ]);
 
         const nodesAB = readBufferNodes.getMappedRange();
@@ -385,6 +420,12 @@ export class FlexRenderer {
         const charsAB = readBufferChars.getMappedRange();
         const charsData = new Float32Array(charsAB);
         const charsU32 = new Uint32Array(charsAB);
+        
+        const curvesAB = readBufferCurves.getMappedRange();
+        const curvesData = new Float32Array(curvesAB);
+        
+        const infosAB = readBufferInfos.getMappedRange();
+        const infosU32 = new Uint32Array(infosAB);
 
         console.log("--- GPU Debug Output ---");
         const nodeCount = this.engine.get_node_count();
@@ -412,14 +453,34 @@ export class FlexRenderer {
                 }
                 console.log(`  Text: "${s}"`);
                 
+                // Inspect First Char
                 const firstBase = textStart * 8;
-                const lastBase = (textStart + textLen - 1) * 8;
-                console.log(`  First Char: (${charsData[firstBase+4].toFixed(1)}, ${charsData[firstBase+5].toFixed(1)})`);
-                console.log(`  Last Char:  (${charsData[lastBase+4].toFixed(1)}, ${charsData[lastBase+5].toFixed(1)})`);
+                const glyphIndex = charsU32[firstBase + 1];
+                console.log(`  First Char Info: GlyphID ${glyphIndex}, Width ${charsData[firstBase+6]}`);
+                
+                // Lookup GlyphInfo
+                const infoBase = glyphIndex * 4; // 4 u32s
+                const startCurve = infosU32[infoBase + 0];
+                const countCurve = infosU32[infoBase + 1];
+                console.log(`  Glyph Info: Curves Start ${startCurve}, Count ${countCurve}`);
+                
+                if (countCurve > 0) {
+                    // Dump first curve
+                    const curveBase = startCurve * 8; // 8 floats
+                    const p0x = curvesData[curveBase + 0];
+                    const p0y = curvesData[curveBase + 1];
+                    const p1x = curvesData[curveBase + 2];
+                    const p1y = curvesData[curveBase + 3];
+                    const p2x = curvesData[curveBase + 4];
+                    const p2y = curvesData[curveBase + 5];
+                    console.log(`    Curve 0: (${p0x.toFixed(2)},${p0y.toFixed(2)}) -> (${p1x.toFixed(2)},${p1y.toFixed(2)}) -> (${p2x.toFixed(2)},${p2y.toFixed(2)})`);
+                }
             }
         }
 
         readBufferNodes.unmap();
         readBufferChars.unmap();
+        readBufferCurves.unmap();
+        readBufferInfos.unmap();
     }
 }

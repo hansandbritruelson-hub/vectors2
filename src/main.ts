@@ -18,8 +18,14 @@ const init = async () => {
     const device = await adapter.requestDevice();
     
     const canvas = document.createElement('canvas');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // Handle High-DPI (Retina) displays
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    // Keep the display size matching the window (CSS pixels)
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    
     document.body.appendChild(canvas);
 
     const context = canvas.getContext('webgpu') as GPUCanvasContext; 
