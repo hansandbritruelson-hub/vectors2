@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use ttf_parser::{Face, GlyphId};
+use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
 #[wasm_bindgen]
 extern "C" {
@@ -8,6 +8,138 @@ extern "C" {
 }
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct GpuCurve {
+    pub p0_x: f32, pub p0_y: f32,
+    pub p1_x: f32, pub p1_y: f32,
+    pub p2_x: f32, pub p2_y: f32,
+    pub _pad0: f32, pub _pad1: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct GpuGlyphInfo {
+    pub start_index: u32,
+    pub count: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+struct PathCollector {
+    curves: Vec<GpuCurve>,
+    scale: f32,
+    x_min: f32,
+    y_max: f32,
+    start_x: f32,
+    start_y: f32,
+    current_x: f32,
+    current_y: f32,
+}
+
+impl PathCollector {
+    fn new(scale: f32, x_min: f32, y_max: f32) -> Self {
+        Self {
+            curves: Vec::new(),
+            scale,
+            x_min,
+            y_max,
+            start_x: 0.0,
+            start_y: 0.0,
+            current_x: 0.0,
+            current_y: 0.0,
+        }
+    }
+
+    fn tx(&self, x: f32) -> f32 { (x - self.x_min) * self.scale }
+    fn ty(&self, y: f32) -> f32 { (self.y_max - y) * self.scale }
+    
+    fn add_line(&mut self, x: f32, y: f32) {
+        // Line is linear bezier where p1 = midpoint
+        let p0_x = self.current_x;
+        let p0_y = self.current_y;
+        let p2_x = self.tx(x);
+        let p2_y = self.ty(y);
+        let p1_x = (p0_x + p2_x) * 0.5;
+        let p1_y = (p0_y + p2_y) * 0.5;
+        
+        self.curves.push(GpuCurve {
+            p0_x, p0_y,
+            p1_x, p1_y,
+            p2_x, p2_y,
+            _pad0: 0.0, _pad1: 0.0
+        });
+        self.current_x = p2_x;
+        self.current_y = p2_y;
+    }
+    
+    fn add_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let p0_x = self.current_x;
+        let p0_y = self.current_y;
+        let p1_x = self.tx(x1);
+        let p1_y = self.ty(y1);
+        let p2_x = self.tx(x);
+        let p2_y = self.ty(y);
+        
+        self.curves.push(GpuCurve {
+            p0_x, p0_y,
+            p1_x, p1_y,
+            p2_x, p2_y,
+            _pad0: 0.0, _pad1: 0.0
+        });
+        self.current_x = p2_x;
+        self.current_y = p2_y;
+    }
+}
+
+impl OutlineBuilder for PathCollector {
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.current_x = self.tx(x);
+        self.current_y = self.ty(y);
+        self.start_x = self.current_x;
+        self.start_y = self.current_y;
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        self.add_line(x, y);
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        self.add_quad(x1, y1, x, y);
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        // Approx cubic
+        let cx = (x1 + x2) * 0.5;
+        let cy = (y1 + y2) * 0.5;
+        self.add_quad(cx, cy, x, y);
+    }
+
+    fn close(&mut self) {
+        // If not at start, close it
+        if (self.current_x - self.start_x).abs() > 0.001 || (self.current_y - self.start_y).abs() > 0.001 {
+             // Add line back to start implicitly
+             // We need to use internal add_line logic but we don't have the original coords easily.
+             // We can just emit a curve directly using transformed coords.
+             let p0_x = self.current_x;
+             let p0_y = self.current_y;
+             let p2_x = self.start_x;
+             let p2_y = self.start_y;
+             let p1_x = (p0_x + p2_x) * 0.5;
+             let p1_y = (p0_y + p2_y) * 0.5;
+             
+             self.curves.push(GpuCurve {
+                p0_x, p0_y,
+                p1_x, p1_y,
+                p2_x, p2_y,
+                 _pad0: 0.0, _pad1: 0.0
+             });
+             self.current_x = p2_x;
+             self.current_y = p2_y;
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -115,6 +247,11 @@ pub struct FlexEngine {
     characters: Vec<Character>,
     glyph_data: Vec<GlyphData>,
     kerning_table: Vec<KerningRecord>,
+    
+    // New GPU Vector Graphics Data
+    curves: Vec<GpuCurve>,
+    glyph_infos: Vec<GpuGlyphInfo>,
+    
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
 }
@@ -130,6 +267,8 @@ impl FlexEngine {
             characters: Vec::new(),
             glyph_data: Vec::new(),
             kerning_table: Vec::new(),
+            curves: Vec::new(),
+            glyph_infos: Vec::new(),
             face: None,
         };
         
@@ -149,12 +288,42 @@ impl FlexEngine {
         // Resize glyph_data to num_glyphs
         let num_glyphs = face.number_of_glyphs();
         self.glyph_data.reserve(num_glyphs as usize);
+        self.glyph_infos.reserve(num_glyphs as usize);
+        
+        let path_scale = 1.0 / units_per_em; // Normalize to 0..1 relative to em size? 
+        // Actually, let's keep it in "Font Units" but scaled to pixel size (24px) like layouts?
+        // Or normalized to 0..1 range? 
+        // Layout uses "scale" (0.0117..). BBox is in pixels.
+        // Code below uses `scale`.
+        // Let's normalize curves to be within [0.0, 1.0] relative to bounding box? No, that's hard shader side.
+        // Let's use the same scale as the layout. So curves are in "Pixels".
+        // BUT, shader will be in "Local Space" of the quad. 
+        // Quad size is glyph.width x glyph.height.
+        // Glyph origin is (0,0) at bottom-left? FreeType origin is (0,0) at baseline. 
+        // If we emit curves in pixels relative to (0,0), bbox.x_min as f32, bbox.y_max as f32 baseline, the shader must shift/scale.
+        
+        // Let's use the same scale as GlyphData.
         
         for id in 0..num_glyphs {
             let gid = GlyphId(id);
             let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
             let bbox = face.glyph_bounding_box(gid).unwrap_or(ttf_parser::Rect { x_min: 0, y_min: 0, x_max: 0, y_max: 0 });
             
+            // Generate Curves
+            let start_index = self.curves.len() as u32;
+            let mut collector = PathCollector::new(scale, bbox.x_min as f32, bbox.y_max as f32);
+            if let Some(_) = face.outline_glyph(gid, &mut collector) {
+                // collected
+            }
+            self.curves.extend(collector.curves);
+            let end_index = self.curves.len() as u32;
+
+            self.glyph_infos.push(GpuGlyphInfo {
+                start_index,
+                count: end_index - start_index,
+                _pad0: 0, _pad1: 0,
+            });
+
             self.glyph_data.push(GlyphData {
                 advance,
                 bearing_x: bbox.x_min as f32 * scale,
@@ -258,6 +427,7 @@ impl FlexEngine {
         }
     }
 
+
     pub fn get_character_count(&self) -> usize {
         self.characters.len()
     }
@@ -289,6 +459,25 @@ impl FlexEngine {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
         }
     }
+
+    // --- New Getters ---
+
+    pub fn get_curve_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.curves.len() * std::mem::size_of::<GpuCurve>();
+        let ptr = self.curves.as_ptr() as *const u8;
+        unsafe {
+            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+
+    pub fn get_glyph_info_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.glyph_infos.len() * std::mem::size_of::<GpuGlyphInfo>();
+        let ptr = self.glyph_infos.as_ptr() as *const u8;
+        unsafe {
+            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+
     
     // Kerning getters omitted for brevity but similar pattern if needed
 }
