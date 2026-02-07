@@ -17,8 +17,8 @@ The layout algorithm follows the standard web layout dependency: **Width determi
 
 **1. Pass 1: "Intrinsic Width" (Bottom-Up)**
 - **Logic:** We start at the leaves.
-- **Simulation:** Leaves calculate their "Desired Width" based on content (e.g., a random number simulating a text string's length or an image size).
-- **Aggregation:** Parents sum the desired widths of their children (or take the max, depending on simulated flex-direction) to determine their own desired width.
+- **Content:** Leaves calculate their "Desired Width" based on `text_length` (multiplied by a simulated character width).
+- **Aggregation:** Parents sum the desired widths of their children to determine their own desired width.
 - **Result:** The Root knows how much space the entire tree *wants*.
 
 **2. Pass 2: "Resolve Width" (Top-Down)**
@@ -33,7 +33,7 @@ The layout algorithm follows the standard web layout dependency: **Width determi
 **3. Pass 3: "Intrinsic Height" (Bottom-Up)**
 - **Logic:** We start at the leaves again.
 - **Crucial Dependency:** Nodes now use their `final_width` (from Pass 2) to calculate height.
-- **Simulation:** A text node checks: "If I have 500px width, I wrap to 2 lines (height=40). If I have 100px width, I wrap to 10 lines (height=200)."
+- **Wrapping:** A text node checks: `ceil((text_length * char_width) / final_width) * line_height`.
 - **Aggregation:** Parents sum child heights to find their own desired height.
 
 **4. Pass 4: "Final Layout" (Top-Down)**

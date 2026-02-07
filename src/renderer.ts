@@ -27,22 +27,23 @@ export class FlexRenderer {
     async init() {
         console.log("Renderer Initialized");
         
-        // 1. Setup Test Scene
-        // Root (0) - Full Screen Container
-        this.engine.add_node(100.0);
-        // Children (1, 2, 3, 4, 5) 
-        this.engine.add_node(300.0); // Child 1
-        this.engine.add_node(400.0); // Child 2
-        this.engine.add_node(200.0); // Child 3
-        this.engine.add_node(150.0); // Child 4
-        this.engine.add_node(250.0); // Child 5
+        // 1. Setup Scene with 4 nodes containing sentences
+        const root = this.engine.add_node(100.0); // Root (0)
         
-        this.engine.set_parent(1, 0);
-        this.engine.set_parent(2, 0);
-        this.engine.set_parent(3, 0);
-        this.engine.set_parent(4, 0);
-        this.engine.set_parent(5, 0);
-        this.engine.set_child_start(0, 1);
+        const sentences = [
+            "This is the first sentence that will be rendered in a div.",
+            "Here is another sentence, slightly longer than the first one to test wrapping.",
+            "Short sentence.",
+            "Building a GPU-accelerated flexbox renderer is quite an interesting challenge for WebGPU and Rust."
+        ];
+
+        for (let i = 0; i < sentences.length; i++) {
+            const childIdx = this.engine.add_node(0.0);
+            this.engine.set_text_length(childIdx, sentences[i].length);
+            this.engine.set_parent(childIdx, root);
+        }
+        
+        this.engine.set_child_start(root, 1);
 
         // 2. Buffers
         const nodeCount = this.engine.get_node_count();
@@ -168,23 +169,37 @@ export class FlexRenderer {
 
         const commandEncoder = this.device.createCommandEncoder();
         
-        // 3. Compute Passes
-        const computePass = commandEncoder.beginComputePass();
-        computePass.setBindGroup(0, this.bindGroupCompute);
-        
-        computePass.setPipeline(this.pipelineBottomUp!);
-        computePass.dispatchWorkgroups(Math.ceil(this.engine.get_node_count() / 64));
-        
-        computePass.setPipeline(this.pipelineTopDown!);
-        computePass.dispatchWorkgroups(Math.ceil(this.engine.get_node_count() / 64));
-        
-        computePass.setPipeline(this.pipelineHeightBottomUp!);
-        computePass.dispatchWorkgroups(Math.ceil(this.engine.get_node_count() / 64));
-        
-        computePass.setPipeline(this.pipelineFinalLayout!);
-        computePass.dispatchWorkgroups(Math.ceil(this.engine.get_node_count() / 64));
-        
-        computePass.end();
+        // 3. Compute Passes (Split into separate passes for implicit synchronization)
+        const nodeCount = this.engine.get_node_count();
+        const workgroups = Math.ceil(nodeCount / 64);
+
+        // Pass 1: Width Bottom-Up
+        const pass1 = commandEncoder.beginComputePass();
+        pass1.setBindGroup(0, this.bindGroupCompute!);
+        pass1.setPipeline(this.pipelineBottomUp!);
+        pass1.dispatchWorkgroups(workgroups);
+        pass1.end();
+
+        // Pass 2: Width Top-Down
+        const pass2 = commandEncoder.beginComputePass();
+        pass2.setBindGroup(0, this.bindGroupCompute!);
+        pass2.setPipeline(this.pipelineTopDown!);
+        pass2.dispatchWorkgroups(workgroups);
+        pass2.end();
+
+        // Pass 3: Height Bottom-Up
+        const pass3 = commandEncoder.beginComputePass();
+        pass3.setBindGroup(0, this.bindGroupCompute!);
+        pass3.setPipeline(this.pipelineHeightBottomUp!);
+        pass3.dispatchWorkgroups(workgroups);
+        pass3.end();
+
+        // Pass 4: Final Layout
+        const pass4 = commandEncoder.beginComputePass();
+        pass4.setBindGroup(0, this.bindGroupCompute!);
+        pass4.setPipeline(this.pipelineFinalLayout!);
+        pass4.dispatchWorkgroups(workgroups);
+        pass4.end();
 
         // 4. Render Pass
         const renderPass = commandEncoder.beginRenderPass({

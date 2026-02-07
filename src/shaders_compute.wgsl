@@ -13,6 +13,10 @@ struct Node {
     child_start_index: u32,
     child_count: u32,
     signals_finished: atomic<u32>,
+    text_length: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 @group(0) @binding(0) var<storage, read_write> nodes: array<Node>;
@@ -63,7 +67,8 @@ fn process_node_width(id: u32) {
     let count = nodes[id].child_count;
     
     if (count == 0u) {
-        nodes[id].desired_width = nodes[id].style_basis;
+        // Compute intrinsic width based on text length (10px per character)
+        nodes[id].desired_width = f32(nodes[id].text_length) * 10.0;
     } else {
         var sum_width = 0.0;
         let start = nodes[id].child_start_index;
@@ -136,9 +141,13 @@ fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 fn process_node_height(id: u32) {
     let count = nodes[id].child_count;
     if (count == 0u) {
-        let area = 3000.0; 
-        let width = max(10.0, nodes[id].final_width);
-        nodes[id].desired_height = max(20.0, area / width);
+        // Intrinsic height based on wrapping text
+        let char_width = 10.0;
+        let line_height = 20.0;
+        let total_content_width = f32(nodes[id].text_length) * char_width;
+        let width = max(char_width, nodes[id].final_width);
+        let num_lines = ceil(total_content_width / width);
+        nodes[id].desired_height = max(line_height, num_lines * line_height);
     } else {
         var max_height = 0.0;
         let start = nodes[id].child_start_index;
