@@ -1,4 +1,5 @@
 use wasm_bindgen::prelude::*;
+use ttf_parser::{Face, GlyphId};
 
 #[wasm_bindgen]
 extern "C" {
@@ -6,6 +7,25 @@ extern "C" {
     fn log(s: &str);
 }
 
+const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct GlyphData {
+    pub advance: f32,
+    pub bearing_x: f32,
+    pub width: f32,   // Bounding box width
+    pub height: f32,  // Bounding box height
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct KerningRecord {
+    pub left: u32,
+    pub right: u32,
+    pub value: f32,
+    pub _pad: u32, // Padding
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -62,8 +82,8 @@ impl Node {
 #[derive(Clone, Copy, Debug)]
 pub struct Character {
     pub value: u32,      // unicode codepoint
-    pub prev: u32,       // previous char
-    pub next: u32,       // next char
+    pub glyph_index: u32, // glyph index in font
+    pub next_glyph_index: u32, // for kerning
     pub node_index: u32, // owner node
 
     pub x: f32,
@@ -73,16 +93,16 @@ pub struct Character {
 }
 
 impl Character {
-    pub fn new(val: u32, prev: u32, next: u32, node_index: u32) -> Self {
+    pub fn new(val: u32, glyph: u32, next_glyph: u32, node_index: u32) -> Self {
         Self {
             value: val,
-            prev,
-            next,
+            glyph_index: glyph,
+            next_glyph_index: next_glyph,
             node_index,
             x: 0.0,
             y: 0.0,
-            width: 10.0,
-            height: 20.0,
+            width: 0.0,
+            height: 0.0,
         }
     }
 }
@@ -91,6 +111,10 @@ impl Character {
 pub struct FlexEngine {
     nodes: Vec<Node>,
     characters: Vec<Character>,
+    glyph_data: Vec<GlyphData>,
+    kerning_table: Vec<KerningRecord>,
+    #[wasm_bindgen(skip)]
+    pub face: Option<Face<'static>>,
 }
 
 #[wasm_bindgen]
@@ -98,13 +122,50 @@ impl FlexEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> FlexEngine {
         log("FlexEngine Initialized via WebAssembly");
-        FlexEngine {
+        
+        let mut engine = FlexEngine {
             nodes: Vec::new(),
             characters: Vec::new(),
+            glyph_data: Vec::new(),
+            kerning_table: Vec::new(),
+            face: None,
+        };
+        
+        engine.parse_font();
+        engine
+    }
+    
+    fn parse_font(&mut self) {
+        // Simple fixed size for demo
+        let face = Face::parse(FONT_DATA, 0).expect("Error parsing font");
+        let units_per_em = face.units_per_em() as f32;
+        let font_size = 24.0; // Fixed 24px font size for now
+        let scale = font_size / units_per_em;
+        
+        log(&format!("Font loaded. UnitsPerEm: {}, Scale: {}", units_per_em, scale));
+        
+        // Resize glyph_data to num_glyphs
+        let num_glyphs = face.number_of_glyphs();
+        self.glyph_data.reserve(num_glyphs as usize);
+        
+        for id in 0..num_glyphs {
+            let gid = GlyphId(id);
+            let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
+            let bbox = face.glyph_bounding_box(gid).unwrap_or(ttf_parser::Rect { x_min: 0, y_min: 0, x_max: 0, y_max: 0 });
+            
+            self.glyph_data.push(GlyphData {
+                advance,
+                bearing_x: bbox.x_min as f32 * scale,
+                width: (bbox.x_max - bbox.x_min) as f32 * scale,
+                height: (bbox.y_max - bbox.y_min) as f32 * scale,
+            });
         }
+        
+        self.face = Some(face);
     }
 
     pub fn add_node(&mut self, style_basis: f32) -> u32 {
+
         let mut node = Node::new();
         node.style_basis = style_basis;
         let index = self.nodes.len() as u32;
@@ -150,10 +211,19 @@ impl FlexEngine {
         
         for (i, &c) in chars_vec.iter().enumerate() {
             let val = c as u32;
-            let prev = if i > 0 { chars_vec[i-1] as u32 } else { 0 };
-            let next = if i < chars_vec.len() - 1 { chars_vec[i+1] as u32 } else { 0 };
-            // Using 0.0 for x,y init. Will be computed by shader.
-            self.characters.push(Character::new(val, prev, next, node_index));
+            let glyph_id = if let Some(face) = &self.face {
+                face.glyph_index(c).map(|g| g.0).unwrap_or(0)
+            } else {
+                0
+            };
+            
+            let next_glyph_id = if i < chars_vec.len() - 1 {
+                 if let Some(face) = &self.face {
+                    face.glyph_index(chars_vec[i+1]).map(|g| g.0).unwrap_or(0)
+                } else { 0 }
+            } else { 0 };
+
+            self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, node_index));
         }
 
         self.nodes[node_index as usize].text_start = start;
@@ -195,4 +265,22 @@ impl FlexEngine {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
         }
     }
+    
+    pub fn get_glyph_data_count(&self) -> usize {
+        self.glyph_data.len()
+    }
+    
+    pub fn get_glyph_data_size(&self) -> usize {
+        std::mem::size_of::<GlyphData>()
+    }
+    
+    pub fn get_glyph_data_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.glyph_data.len() * std::mem::size_of::<GlyphData>();
+        let ptr = self.glyph_data.as_ptr() as *const u8;
+        unsafe {
+            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+    
+    // Kerning getters omitted for brevity but similar pattern if needed
 }
