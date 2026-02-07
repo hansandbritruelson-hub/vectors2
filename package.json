@@ -1,0 +1,23 @@
+{
+  "name": "creator2",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "wasm:build": "wasm-pack build renderer-core --target bundler",
+    "dev": "npm run wasm:build && vite",
+    "build": "npm run wasm:build && tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.69",
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0",
+    "wasm-pack": "^0.14.0"
+  },
+  "dependencies": {
+    "renderer-core": "file:renderer-core/pkg"
+  }
+}
