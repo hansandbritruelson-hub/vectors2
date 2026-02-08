@@ -1,5 +1,5 @@
 struct Node {
-    style_min_width: f32,
+    fixed_width: f32, // -1.0 = auto
     style_basis: f32,
     desired_width: f32,
     final_width: f32,
@@ -150,6 +150,11 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 fn process_node_width(id: u32) {
     let count = nodes[id].child_count;
     
+    if (nodes[id].fixed_width >= 0.0) {
+        nodes[id].desired_width = nodes[id].fixed_width;
+        return;
+    }
+
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
@@ -192,17 +197,26 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Check Parent Direction
             if (nodes[parent_id].flex_direction == 1u) { // Column
                 // In Column, children get the parent's final width
-                nodes[id].final_width = nodes[parent_id].final_width;
-            } else { // Row
-                let parent_desired = nodes[parent_id].desired_width;
-                let parent_final = nodes[parent_id].final_width;
-                let my_desired = nodes[id].desired_width;
-                
-                if (parent_desired > 0.0) {
-                    let ratio = parent_final / parent_desired;
-                    nodes[id].final_width = my_desired * ratio;
+                // UNLESS they have a fixed width
+                if (nodes[id].fixed_width >= 0.0) {
+                    nodes[id].final_width = nodes[id].fixed_width;
                 } else {
-                    nodes[id].final_width = 0.0;
+                    nodes[id].final_width = nodes[parent_id].final_width;
+                }
+            } else { // Row
+                if (nodes[id].fixed_width >= 0.0) {
+                    nodes[id].final_width = nodes[id].fixed_width;
+                } else {
+                    let parent_desired = nodes[parent_id].desired_width;
+                    let parent_final = nodes[parent_id].final_width;
+                    let my_desired = nodes[id].desired_width;
+                    
+                    if (parent_desired > 0.0) {
+                        let ratio = parent_final / parent_desired;
+                        nodes[id].final_width = my_desired * ratio;
+                    } else {
+                        nodes[id].final_width = 0.0;
+                    }
                 }
             }
             atomicStore(&nodes[id].signals_finished, 1u);

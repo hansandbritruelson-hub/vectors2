@@ -16,12 +16,12 @@ export class FlexRenderer {
     pipelineFinalLayout: GPUComputePipeline | null = null;
     pipelineRender: GPURenderPipeline | null = null;
     pipelineRenderText: GPURenderPipeline | null = null;
-    
+
     bindGroupCompute: GPUBindGroup | null = null;
     bindGroupRender: GPUBindGroup | null = null;
     uniformBuffer: GPUBuffer | null = null;
     glyphBuffer: GPUBuffer | null = null;
-    
+
     // Vector Graphics Buffers
     curveBuffer: GPUBuffer | null = null;
     glyphInfoBuffer: GPUBuffer | null = null;
@@ -34,19 +34,20 @@ export class FlexRenderer {
 
     async init() {
         console.log("Renderer Initialized");
-        
+
         // 1. Setup Scene
         // Grand Root (Index 0) - Row Direction (Sidebar + Main Content)
-        const grandRoot = this.engine.add_node(800.0); 
+        const grandRoot = this.engine.add_node(800.0);
         this.engine.set_flex_direction(grandRoot, 0); // 0 = Row
 
         // Sidebar (Index 1) - Left Column
-        const sidebar = this.engine.add_node(200.0);
+        const sidebar = this.engine.add_node(0.0);
+        this.engine.set_fixed_width(sidebar, 100.0);
         this.engine.set_text(sidebar, "SIDEBAR\n\nDashboard\nAnalytics\nCustomers\nSettings\n\nStatus: OK");
         this.engine.set_parent(sidebar, grandRoot);
 
         // Main Content (Index 2) - Right Column (Column Direction)
-        const mainContent = this.engine.add_node(0.0); 
+        const mainContent = this.engine.add_node(0.0);
         this.engine.set_flex_direction(mainContent, 1); // 1 = Column
         this.engine.set_parent(mainContent, grandRoot);
 
@@ -74,7 +75,7 @@ export class FlexRenderer {
         const t2 = this.engine.add_node(0.0);
         this.engine.set_text(t2, "Row 1 - Item B: This is also a significant amount of text to ensure that we have proper distribution of space between these two items in the first row.");
         this.engine.set_parent(t2, row1);
-        
+
         this.engine.set_child_start(row1, 5); // Children start at index 5
 
         // Content for Row 2 (Indices 7, 8)
@@ -85,13 +86,13 @@ export class FlexRenderer {
         const t4 = this.engine.add_node(0.0);
         this.engine.set_text(t4, "Row 2 - Item D: Finally, this is the last block of text. By making all of these sentences longer, we stress test the line breaking algorithms in the compute shader.");
         this.engine.set_parent(t4, row2);
-        
+
         this.engine.set_child_start(row2, 7); // Children start at index 7
-        
+
         // 2. Buffers
         const nodeCount = this.engine.get_node_count();
         const nodeSize = this.engine.get_node_size();
-        
+
         this.nodesBuffer = this.device.createBuffer({
             size: nodeCount * nodeSize,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
@@ -99,12 +100,12 @@ export class FlexRenderer {
 
         const charCount = this.engine.get_character_count();
         const charSize = this.engine.get_character_size();
-        
+
         this.charactersBuffer = this.device.createBuffer({
-            size: Math.max(charCount * charSize, 4), 
+            size: Math.max(charCount * charSize, 4),
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
         });
-        
+
         // Initial upload of character data
         if (charCount > 0) {
             const charData = this.engine.get_characters_buffer();
@@ -113,7 +114,7 @@ export class FlexRenderer {
 
         const glyphCount = this.engine.get_glyph_data_count();
         const glyphSize = this.engine.get_glyph_data_size();
-        
+
         this.glyphBuffer = this.device.createBuffer({
             size: Math.max(glyphCount * glyphSize, 4),
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
@@ -123,9 +124,9 @@ export class FlexRenderer {
             const glyphData = this.engine.get_glyph_data_buffer();
             this.device.queue.writeBuffer(this.glyphBuffer, 0, glyphData.buffer, glyphData.byteOffset, glyphData.byteLength);
         }
-        
+
         this.uniformBuffer = this.device.createBuffer({
-            size: 16, 
+            size: 16,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -137,9 +138,9 @@ export class FlexRenderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
         });
         if (curveData.byteLength > 0) {
-           this.device.queue.writeBuffer(this.curveBuffer, 0, curveData.buffer, curveData.byteOffset, curveData.byteLength);
+            this.device.queue.writeBuffer(this.curveBuffer, 0, curveData.buffer, curveData.byteOffset, curveData.byteLength);
         } else {
-           console.warn("[JS] Curve buffer is empty!");
+            console.warn("[JS] Curve buffer is empty!");
         }
 
         const glyphInfoData = this.engine.get_glyph_info_buffer();
@@ -157,7 +158,7 @@ export class FlexRenderer {
         // 3. Pipelines
         const moduleCompute = this.device.createShaderModule({ code: shaderCompute });
         const moduleVisual = this.device.createShaderModule({ code: shaderVisual });
-        
+
         const bindGroupLayoutCompute = this.device.createBindGroupLayout({
             entries: [
                 {
@@ -321,10 +322,10 @@ export class FlexRenderer {
         const descender = this.engine.get_descender();
         const lineGap = this.engine.get_line_gap();
         const lineHeight = ascender - descender + lineGap;
-        
+
         const uniformData = new Float32Array([
-            canvas.width / dpr, 
-            canvas.height / dpr, 
+            canvas.width / dpr,
+            canvas.height / dpr,
             ascender,
             lineHeight
         ]);
@@ -335,7 +336,7 @@ export class FlexRenderer {
         this.device.queue.writeBuffer(this.nodesBuffer, 0, nodesData.buffer, nodesData.byteOffset, nodesData.byteLength);
 
         const commandEncoder = this.device.createCommandEncoder();
-        
+
         // 3. Compute Passes (Split into separate passes for implicit synchronization)
         const nodeCount = this.engine.get_node_count();
         const workgroups = Math.ceil(nodeCount / 64);
@@ -404,7 +405,7 @@ export class FlexRenderer {
         renderPass.setPipeline(this.pipelineRender!);
         renderPass.setBindGroup(0, this.bindGroupRender);
         renderPass.draw(6, this.engine.get_node_count());
-        
+
         // Draw Text
         // We draw 6 vertices per character (quad)
         // Instance count is character count
@@ -422,7 +423,7 @@ export class FlexRenderer {
 
     async debug() {
         if (!this.nodesBuffer || !this.charactersBuffer || !this.curveBuffer || !this.glyphInfoBuffer) return;
-        
+
         const readBufferNodes = this.device.createBuffer({
             size: this.nodesBuffer.size,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -438,7 +439,7 @@ export class FlexRenderer {
             size: this.curveBuffer.size,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
         });
-        
+
         const readBufferInfos = this.device.createBuffer({
             size: this.glyphInfoBuffer.size,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -449,7 +450,7 @@ export class FlexRenderer {
         commandEncoder.copyBufferToBuffer(this.charactersBuffer, 0, readBufferChars, 0, readBufferChars.size);
         commandEncoder.copyBufferToBuffer(this.curveBuffer, 0, readBufferCurves, 0, readBufferCurves.size);
         commandEncoder.copyBufferToBuffer(this.glyphInfoBuffer, 0, readBufferInfos, 0, readBufferInfos.size);
-        
+
         this.device.queue.submit([commandEncoder.finish()]);
 
         await Promise.all([
@@ -462,33 +463,33 @@ export class FlexRenderer {
         const nodesAB = readBufferNodes.getMappedRange();
         const nodesData = new Float32Array(nodesAB);
         const nodesU32 = new Uint32Array(nodesAB);
-        
+
         const charsAB = readBufferChars.getMappedRange();
         const charsData = new Float32Array(charsAB);
         const charsU32 = new Uint32Array(charsAB);
-        
+
         const curvesAB = readBufferCurves.getMappedRange();
         const curvesData = new Float32Array(curvesAB);
-        
+
         const infosAB = readBufferInfos.getMappedRange();
         const infosU32 = new Uint32Array(infosAB);
 
         console.log("--- GPU Debug Output ---");
         const nodeCount = this.engine.get_node_count();
         const nodeFloats = 16; // 64 bytes / 4
-        
+
         for (let i = 0; i < nodeCount; i++) {
             const base = i * nodeFloats;
             const finalW = nodesData[base + 3];
             const finalH = nodesData[base + 5];
             const x = nodesData[base + 6];
             const y = nodesData[base + 7];
-            
+
             const textStart = nodesU32[base + 12];
             const textLen = nodesU32[base + 13];
 
             console.log(`Node ${i}: Pos(${x.toFixed(1)}, ${y.toFixed(1)}) Size(${finalW.toFixed(1)} x ${finalH.toFixed(1)}) text[${textStart}, ${textLen}]`);
-            
+
             if (textLen > 0) {
                 let s = "";
                 for (let j = 0; j < textLen; j++) {
@@ -498,18 +499,18 @@ export class FlexRenderer {
                     s += String.fromCharCode(val);
                 }
                 console.log(`  Text: "${s}"`);
-                
+
                 // Inspect First Char
                 const firstBase = textStart * 8;
                 const glyphIndex = charsU32[firstBase + 1];
-                console.log(`  First Char Info: GlyphID ${glyphIndex}, Width ${charsData[firstBase+6]}, BearingY ${charsData[firstBase+5]}`);
-                
+                console.log(`  First Char Info: GlyphID ${glyphIndex}, Width ${charsData[firstBase + 6]}, BearingY ${charsData[firstBase + 5]}`);
+
                 // Lookup GlyphInfo
                 const infoBase = glyphIndex * 4; // 4 u32s
                 const startCurve = infosU32[infoBase + 0];
                 const countCurve = infosU32[infoBase + 1];
                 console.log(`  Glyph Info: Curves Start ${startCurve}, Count ${countCurve}`);
-                
+
                 if (countCurve > 0) {
                     // Dump first curve
                     const curveBase = startCurve * 8; // 8 floats
@@ -519,7 +520,9 @@ export class FlexRenderer {
                     const p1y = curvesData[curveBase + 3];
                     const p2x = curvesData[curveBase + 4];
                     const p2y = curvesData[curveBase + 5];
-                    console.log(`    Curve 0: (${p0x.toFixed(2)},${p0y.toFixed(2)}) -> (${p1x.toFixed(2)},${p1y.toFixed(2)}) -> (${p2x.toFixed(2)},${p2y.toFixed(2)})`);
+                    const p3x = curvesData[curveBase + 6];
+                    const p3y = curvesData[curveBase + 7];
+                    console.log(`    Curve 0: (${p0x.toFixed(2)},${p0y.toFixed(2)}) -> (${p1x.toFixed(2)},${p1y.toFixed(2)}) -> (${p2x.toFixed(2)},${p2y.toFixed(2)}) -> (${p3x.toFixed(2)},${p3y.toFixed(2)})`);
                 }
             }
         }

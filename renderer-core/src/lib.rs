@@ -15,7 +15,7 @@ pub struct GpuCurve {
     pub p0_x: f32, pub p0_y: f32,
     pub p1_x: f32, pub p1_y: f32,
     pub p2_x: f32, pub p2_y: f32,
-    pub _pad0: f32, pub _pad1: f32,
+    pub p3_x: f32, pub p3_y: f32,
 }
 
 #[repr(C)]
@@ -56,40 +56,69 @@ impl PathCollector {
     fn ty(&self, y: f32) -> f32 { (self.y_max - y) * self.scale }
     
     fn add_line(&mut self, x: f32, y: f32) {
-        // Line is linear bezier where p1 = midpoint
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p2_x = self.tx(x);
-        let p2_y = self.ty(y);
-        let p1_x = (p0_x + p2_x) * 0.5;
-        let p1_y = (p0_y + p2_y) * 0.5;
-        
+        let p3_x = self.tx(x);
+        let p3_y = self.ty(y);
+
+        // Represent line as cubic
+        let p1_x = p0_x + (p3_x - p0_x) / 3.0;
+        let p1_y = p0_y + (p3_y - p0_y) / 3.0;
+        let p2_x = p0_x + 2.0 * (p3_x - p0_x) / 3.0;
+        let p2_y = p0_y + 2.0 * (p3_y - p0_y) / 3.0;
+
         self.curves.push(GpuCurve {
             p0_x, p0_y,
             p1_x, p1_y,
             p2_x, p2_y,
-            _pad0: 0.0, _pad1: 0.0
+            p3_x, p3_y,
         });
-        self.current_x = p2_x;
-        self.current_y = p2_y;
+        self.current_x = p3_x;
+        self.current_y = p3_y;
     }
     
     fn add_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p1_x = self.tx(x1);
-        let p1_y = self.ty(y1);
-        let p2_x = self.tx(x);
-        let p2_y = self.ty(y);
+        let cp_x = self.tx(x1);
+        let cp_y = self.ty(y1);
+        let p3_x = self.tx(x);
+        let p3_y = self.ty(y);
+
+        // Represent quadratic as cubic
+        let p1_x = p0_x + 2.0 * (cp_x - p0_x) / 3.0;
+        let p1_y = p0_y + 2.0 * (cp_y - p0_y) / 3.0;
+        let p2_x = p3_x + 2.0 * (cp_x - p3_x) / 3.0;
+        let p2_y = p3_y + 2.0 * (cp_y - p3_y) / 3.0;
         
         self.curves.push(GpuCurve {
             p0_x, p0_y,
             p1_x, p1_y,
             p2_x, p2_y,
-            _pad0: 0.0, _pad1: 0.0
+            p3_x, p3_y,
         });
-        self.current_x = p2_x;
-        self.current_y = p2_y;
+        self.current_x = p3_x;
+        self.current_y = p3_y;
+    }
+
+    fn add_cubic(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let p0_x = self.current_x;
+        let p0_y = self.current_y;
+        let p1_x = self.tx(x1);
+        let p1_y = self.ty(y1);
+        let p2_x = self.tx(x2);
+        let p2_y = self.ty(y2);
+        let p3_x = self.tx(x);
+        let p3_y = self.ty(y);
+
+        self.curves.push(GpuCurve {
+            p0_x, p0_y,
+            p1_x, p1_y,
+            p2_x, p2_y,
+            p3_x, p3_y,
+        });
+        self.current_x = p3_x;
+        self.current_y = p3_y;
     }
 }
 
@@ -110,33 +139,31 @@ impl OutlineBuilder for PathCollector {
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        // Approx cubic
-        let cx = (x1 + x2) * 0.5;
-        let cy = (y1 + y2) * 0.5;
-        self.add_quad(cx, cy, x, y);
+        self.add_cubic(x1, y1, x2, y2, x, y);
     }
 
     fn close(&mut self) {
         // If not at start, close it
         if (self.current_x - self.start_x).abs() > 0.001 || (self.current_y - self.start_y).abs() > 0.001 {
-             // Add line back to start implicitly
-             // We need to use internal add_line logic but we don't have the original coords easily.
-             // We can just emit a curve directly using transformed coords.
              let p0_x = self.current_x;
              let p0_y = self.current_y;
-             let p2_x = self.start_x;
-             let p2_y = self.start_y;
-             let p1_x = (p0_x + p2_x) * 0.5;
-             let p1_y = (p0_y + p2_y) * 0.5;
+             let p3_x = self.start_x;
+             let p3_y = self.start_y;
+             
+             // Represent line as cubic
+             let p1_x = p0_x + (p3_x - p0_x) / 3.0;
+             let p1_y = p0_y + (p3_y - p0_y) / 3.0;
+             let p2_x = p0_x + 2.0 * (p3_x - p0_x) / 3.0;
+             let p2_y = p0_y + 2.0 * (p3_y - p0_y) / 3.0;
              
              self.curves.push(GpuCurve {
                 p0_x, p0_y,
                 p1_x, p1_y,
                 p2_x, p2_y,
-                 _pad0: 0.0, _pad1: 0.0
+                p3_x, p3_y,
              });
-             self.current_x = p2_x;
-             self.current_y = p2_y;
+             self.current_x = p3_x;
+             self.current_y = p3_y;
         }
     }
 }
@@ -164,7 +191,7 @@ pub struct KerningRecord {
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     // --- Layout Inputs (Style) ---
-    pub style_min_width: f32,
+    pub fixed_width: f32,   // -1.0 = auto
     pub style_basis: f32,
 
     // --- Computed Values (Phase A - Width) ---
@@ -193,8 +220,8 @@ pub struct Node {
 impl Node {
     pub fn new() -> Self {
         Self {
-            style_min_width: 0.0,
-            style_basis: 100.0,
+            fixed_width: -1.0,
+            style_basis: 0.0,
             desired_width: 0.0,
             final_width: 0.0,
             desired_height: 0.0,
@@ -326,10 +353,10 @@ impl FlexEngine {
 
             self.glyph_data.push(GlyphData {
                 advance,
-                bearing_x: bbox.x_min as f32 * scale,
-                bearing_y: bbox.y_max as f32 * scale,
-                width: (bbox.x_max - bbox.x_min) as f32 * scale,
-                height: (bbox.y_max - bbox.y_min) as f32 * scale,
+                bearing_x: bbox.x_min as f32 * scale - 1.0, // 1px padding
+                bearing_y: bbox.y_max as f32 * scale + 1.0,
+                width: (bbox.x_max - bbox.x_min) as f32 * scale + 2.0,
+                height: (bbox.y_max - bbox.y_min) as f32 * scale + 2.0,
             });
         }
         
@@ -371,6 +398,12 @@ impl FlexEngine {
     pub fn set_flex_direction(&mut self, node_index: u32, direction: u32) {
         if (node_index as usize) < self.nodes.len() {
             self.nodes[node_index as usize].flex_direction = direction;
+        }
+    }
+
+    pub fn set_fixed_width(&mut self, node_index: u32, width: f32) {
+        if (node_index as usize) < self.nodes.len() {
+            self.nodes[node_index as usize].fixed_width = width;
         }
     }
 
