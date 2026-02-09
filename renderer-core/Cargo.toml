@@ -29,6 +29,8 @@ web-sys = { version = "0.3", features = [
     "GpuBindGroup",
     "GpuBindGroupLayout",
     "GpuBuffer",
+    "GpuBufferUsage",
+    "GpuMapMode",
     "GpuCommandEncoder",
     "GpuRenderPassEncoder",
     "GpuComputePassEncoder",
@@ -63,5 +65,8 @@ web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
     "GpuCommandBuffer",
     "GpuBlendState",
-    "GpuBlendComponent"
+    "GpuBlendComponent",
 ] }
+
+[dependencies.wasm-bindgen-futures]
+version = "0.4"
