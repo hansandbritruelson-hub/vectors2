@@ -9,6 +9,59 @@ crate-type = ["cdylib"]
 [dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["console"] }
 ttf-parser = "0.20"
-
+resvg = "0.29.0"
+tiny-skia = "0.8.4"
+usvg = "0.29.0"
+web-sys = { version = "0.3", features = [
+    "console",
+    "Window",
+    "Navigator",
+    "Gpu",
+    "GpuAdapter",
+    "GpuDevice",
+    "GpuCanvasContext",
+    "GpuQueue",
+    "GpuShaderModule",
+    "GpuRenderPipeline",
+    "GpuComputePipeline",
+    "GpuPipelineLayout",
+    "GpuBindGroup",
+    "GpuBindGroupLayout",
+    "GpuBuffer",
+    "GpuCommandEncoder",
+    "GpuRenderPassEncoder",
+    "GpuComputePassEncoder",
+    "GpuTexture",
+    "GpuTextureView",
+    "GpuSampler",
+    "GpuColorTargetState",
+    "GpuFragmentState",
+    "GpuVertexState",
+    "GpuPrimitiveState",
+    "GpuBufferBinding",
+    "GpuBufferBindingLayout",
+    "GpuBufferBindingType",
+    "GpuBufferDescriptor",
+    "GpuRenderPipelineDescriptor",
+    "GpuComputePipelineDescriptor",
+    "GpuShaderModuleDescriptor",
+    "GpuBindGroupDescriptor",
+    "GpuBindGroupLayoutDescriptor",
+    "GpuBindGroupEntry",
+    "GpuBindGroupLayoutEntry",
+    "GpuPipelineLayoutDescriptor",
+    "GpuCommandEncoderDescriptor",
+    "GpuRenderPassDescriptor",
+    "GpuRenderPassColorAttachment",
+    "GpuComputePassDescriptor",
+    "GpuLoadOp",
+    "GpuStoreOp",
+    "GpuIndexFormat",
+    "GpuTextureFormat",
+    "GpuPrimitiveTopology",
+    "HtmlCanvasElement",
+    "GpuCommandBuffer",
+    "GpuBlendState",
+    "GpuBlendComponent"
+] }

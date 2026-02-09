@@ -36,58 +36,7 @@ export class FlexRenderer {
         console.log("Renderer Initialized");
 
         // 1. Setup Scene
-        // Grand Root (Index 0) - Row Direction (Sidebar + Main Content)
-        const grandRoot = this.engine.add_node(800.0);
-        this.engine.set_flex_direction(grandRoot, 0); // 0 = Row
-
-        // Sidebar (Index 1) - Left Column
-        const sidebar = this.engine.add_node(0.0);
-        this.engine.set_fixed_width(sidebar, 100.0);
-        this.engine.set_text(sidebar, "SIDEBAR\n\nDashboard\nAnalytics\nCustomers\nSettings\n\nStatus: OK");
-        this.engine.set_parent(sidebar, grandRoot);
-
-        // Main Content (Index 2) - Right Column (Column Direction)
-        const mainContent = this.engine.add_node(0.0);
-        this.engine.set_flex_direction(mainContent, 1); // 1 = Column
-        this.engine.set_parent(mainContent, grandRoot);
-
-        // Set Grand Root Children (Sidebar, Main Content)
-        this.engine.set_child_start(grandRoot, 1);
-
-        // --- Content Area Below ---
-
-        // Row 1 (Index 3) - Row Direction
-        const row1 = this.engine.add_node(0.0);
-        this.engine.set_parent(row1, mainContent);
-
-        // Row 2 (Index 4) - Row Direction
-        const row2 = this.engine.add_node(0.0);
-        this.engine.set_parent(row2, mainContent);
-
-        // Set mainContent Children (Row 1, Row 2)
-        this.engine.set_child_start(mainContent, 3); // Children start at index 3
-
-        // Content for Row 1 (Indices 5, 6)
-        const t1 = this.engine.add_node(0.0);
-        this.engine.set_text(t1, "Row 1 - Item A: This is a much longer sentence designed to test the wrapping capabilities of our GPU renderer. It should span multiple lines if everything is working correctly.");
-        this.engine.set_parent(t1, row1);
-
-        const t2 = this.engine.add_node(0.0);
-        this.engine.set_text(t2, "Row 1 - Item B: This is also a significant amount of text to ensure that we have proper distribution of space between these two items in the first row.");
-        this.engine.set_parent(t2, row1);
-
-        this.engine.set_child_start(row1, 5); // Children start at index 5
-
-        // Content for Row 2 (Indices 7, 8)
-        const t3 = this.engine.add_node(0.0);
-        this.engine.set_text(t3, "Row 2 - Item C: This third block of text is in the second row, which should appear below the first row. It also needs to be long enough to wrap.");
-        this.engine.set_parent(t3, row2);
-
-        const t4 = this.engine.add_node(0.0);
-        this.engine.set_text(t4, "Row 2 - Item D: Finally, this is the last block of text. By making all of these sentences longer, we stress test the line breaking algorithms in the compute shader.");
-        this.engine.set_parent(t4, row2);
-
-        this.engine.set_child_start(row2, 7); // Children start at index 7
+        // UI is now built in Rust (renderer-core/src/ui.rs)
 
         // 2. Buffers
         const nodeCount = this.engine.get_node_count();

@@ -1,4 +1,4 @@
-import { FlexRenderer } from './renderer';
+import { FlexRenderer } from 'renderer-core';
 import initWasm from 'renderer-core';
 
 const init = async () => {
@@ -16,7 +16,7 @@ const init = async () => {
     }
 
     const device = await adapter.requestDevice();
-    
+
     const canvas = document.createElement('canvas');
     // Handle High-DPI (Retina) displays
     const dpr = window.devicePixelRatio || 1;
@@ -25,10 +25,10 @@ const init = async () => {
     // Keep the display size matching the window (CSS pixels)
     canvas.style.width = window.innerWidth + 'px';
     canvas.style.height = window.innerHeight + 'px';
-    
+
     document.body.appendChild(canvas);
 
-    const context = canvas.getContext('webgpu') as GPUCanvasContext; 
+    const context = canvas.getContext('webgpu') as GPUCanvasContext;
     if (!context) {
         console.error("WebGPU context lost");
         return;
@@ -42,7 +42,7 @@ const init = async () => {
 
     const renderer = new FlexRenderer(device, context);
     await renderer.init();
-    
+
     let frameCount = 0;
     // Game Loop
     const frame = () => {

@@ -1,5 +1,11 @@
 use wasm_bindgen::prelude::*;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use tiny_skia::{Pixmap, Transform};
+// use usvg::{Options, Tree, FitTo};
+
+pub mod renderer;
+pub mod ui;
+pub use renderer::FlexRenderer;
 
 #[wasm_bindgen]
 extern "C" {
@@ -526,4 +532,14 @@ impl FlexEngine {
 
     
     // Kerning getters omitted for brevity but similar pattern if needed
+}
+
+#[wasm_bindgen]
+pub fn render_svg(svg_content: &str, width: u32, height: u32) -> Vec<u8> {
+    log(&format!("Rendering SVG (Disabled for migration): {}x{}", width, height));
+    Vec::new()
+    /*
+    let opt = Options::default();
+    // ... (rest of the code)
+    */
 }
