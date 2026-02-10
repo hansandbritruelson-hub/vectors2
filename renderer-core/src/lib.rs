@@ -5,12 +5,11 @@ use tiny_skia::{Pixmap, Transform};
 
 pub mod renderer;
 pub mod ui;
+pub mod web_bindings;
 pub use renderer::FlexRenderer;
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
+pub fn log(s: &str) {
+    web_bindings::log(s);
 }
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");

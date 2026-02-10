@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
-use web_sys::{
+use wasm_bindgen::JsCast;
+use crate::web_bindings::{
     GpuDevice, GpuCanvasContext, GpuBuffer, GpuBufferDescriptor,
     GpuBindGroup, GpuBindGroupDescriptor, GpuBindGroupEntry,
     GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry,
@@ -11,18 +12,13 @@ use web_sys::{
     GpuComputePassEncoder, GpuRenderPassEncoder,
     GpuTexture, GpuTextureDescriptor, GpuTextureFormat,
     GpuDepthStencilState, GpuRenderPassDepthStencilAttachment,
+    GpuBufferUsage, GpuTextureUsage, GpuShaderStage, GpuMapMode,
+    get_window, Window, HtmlCanvasElement, GpuSampler
 };
-use crate::FlexEngine;
-use js_sys::{Object, Reflect};
+use crate::{FlexEngine, log};
+use js_sys::{Object, Reflect, Promise};
 
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-
-    #[wasm_bindgen(js_namespace = console, js_name = warn)]
-    fn warn(s: &str);
-}
+// No local log/warn - use crate::log
 
 const SHADER_COMPUTE: &str = include_str!("shaders_compute.wgsl");
 const SHADER_VISUAL: &str = include_str!("shaders_visual.wgsl");
@@ -89,7 +85,7 @@ impl FlexRenderer {
         }
     }
 
-    pub fn init(&mut self) -> Result<(), JsValue> {
+    pub fn init(&mut self) -> Result<(), wasm_bindgen::JsValue> {
         log("Rust Renderer Initializing...");
 
         // 1. Setup Scene
@@ -184,27 +180,27 @@ impl FlexRenderer {
         let module_visual = self.device.create_shader_module(&GpuShaderModuleDescriptor::new(SHADER_VISUAL));
 
         // Generate Bind Group Layouts
-        let make_layout_entry = |binding: u32, visibility: u32, type_: GpuBufferBindingType| -> GpuBindGroupLayoutEntry {
+        let make_layout_entry = |binding: u32, visibility: u32, type_: GpuBufferBindingType| -> js_sys::Object {
              let mut layout_entry = GpuBindGroupLayoutEntry::new(binding, visibility);
              let mut buffer_layout = GpuBufferBindingLayout::new();
-             buffer_layout.type_(type_);
-             layout_entry.buffer(&buffer_layout);
+             Reflect::set(&buffer_layout, &"type".into(), &type_.as_str().into()).unwrap();
+             Reflect::set(&layout_entry, &"buffer".into(), &buffer_layout).unwrap();
              layout_entry
         };
 
         let bind_group_layout_compute = self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of4(
-            &make_layout_entry(0, 4, GpuBufferBindingType::Storage),
-            &make_layout_entry(1, 4, GpuBufferBindingType::Uniform),
-            &make_layout_entry(2, 4, GpuBufferBindingType::Storage),
-            &make_layout_entry(3, 4, GpuBufferBindingType::ReadOnlyStorage),
+            &make_layout_entry(0, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
+            &make_layout_entry(1, GpuShaderStage::COMPUTE, GpuBufferBindingType::Uniform),
+            &make_layout_entry(2, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
+            &make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage),
         )));
 
         let bind_group_layout_render = self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of5(
-            &make_layout_entry(0, 1, GpuBufferBindingType::ReadOnlyStorage), // Vertex
-            &make_layout_entry(1, 1, GpuBufferBindingType::Uniform), // Vertex
-            &make_layout_entry(2, 1, GpuBufferBindingType::ReadOnlyStorage), // Vertex
-            &make_layout_entry(3, 2, GpuBufferBindingType::ReadOnlyStorage), // Fragment
-            &make_layout_entry(4, 2, GpuBufferBindingType::ReadOnlyStorage), // Fragment
+            &make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage), // Vertex
+            &make_layout_entry(1, GpuShaderStage::VERTEX, GpuBufferBindingType::Uniform), // Vertex
+            &make_layout_entry(2, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage), // Vertex
+            &make_layout_entry(3, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage), // Fragment
+            &make_layout_entry(4, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage), // Fragment
         )));
 
         let layout_compute = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(&bind_group_layout_compute)));
@@ -240,7 +236,7 @@ impl FlexRenderer {
             Reflect::set(&vs_state_obj, &"module".into(), &module_visual).unwrap();
             Reflect::set(&vs_state_obj, &"entryPoint".into(), &vs_entry.into()).unwrap();
 
-            let target = GpuColorTargetState::new(web_sys::GpuTextureFormat::Bgra8unorm); 
+            let target = GpuColorTargetState::new(GpuTextureFormat::Bgra8unorm); 
             // Blend
             let blend = js_sys::Object::new();
             let color_blend = js_sys::Object::new();
@@ -324,9 +320,9 @@ impl FlexRenderer {
             return; 
         }
 
-        let window = web_sys::window().unwrap();
-        let dpr = window.device_pixel_ratio();
-        let canvas: web_sys::HtmlCanvasElement = self.context.canvas().unchecked_into();
+        let windowValue = get_window().unwrap();
+        let dpr = windowValue.device_pixel_ratio();
+        let canvas: HtmlCanvasElement = self.context.canvas();
         let width = canvas.width() as f32 / dpr as f32;
         let height = canvas.height() as f32 / dpr as f32;
 
@@ -360,25 +356,11 @@ impl FlexRenderer {
         let node_count = self.engine.get_node_count() as u32;
         let workgroups = (node_count as f32 / 64.0).ceil() as u32;
         let dispatch = |pass: &GpuComputePassEncoder, x: u32| {
-             let method_name = "dispatchWorkgroups";
-             let method = js_sys::Reflect::get(pass, &method_name.into()).unwrap();
-             if method.is_undefined() {
-                 log(&format!("CRITICAL ERROR: {} method not found on GpuComputePassEncoder", method_name));
-             } else {
-                 let func = method.dyn_into::<js_sys::Function>().unwrap();
-                 func.call1(pass, &x.into()).unwrap();
-             }
+             pass.dispatchWorkgroups(x, 1, 1);
         };
         
         let end_compute = |pass: &GpuComputePassEncoder| {
-             let method_name = "end";
-             let method = js_sys::Reflect::get(pass, &method_name.into()).unwrap();
-             if method.is_undefined() {
-                  log(&format!("CRITICAL ERROR: {} method not found on GpuComputePassEncoder", method_name));
-             } else {
-                 let func = method.dyn_into::<js_sys::Function>().unwrap();
-                 func.call0(pass).unwrap();
-             }
+             pass.end_compute();
         };
 
         // Pass 1: Width Bottom-Up
@@ -386,8 +368,8 @@ impl FlexRenderer {
         {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_bottom_up.is_none() { log("Pipeline bottom_up is None!"); }
-            pass.set_pipeline(self.pipeline_bottom_up.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_bottom_up.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -397,8 +379,8 @@ impl FlexRenderer {
         {
             let pass = command_encoder.begin_compute_pass();
              if self.pipeline_reset_signals.is_none() { log("Pipeline reset is None!"); }
-            pass.set_pipeline(self.pipeline_reset_signals.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -408,8 +390,8 @@ impl FlexRenderer {
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
              if self.pipeline_top_down.is_none() { log("Pipeline top_down is None!"); }
-            pass.set_pipeline(self.pipeline_top_down.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_top_down.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -418,8 +400,8 @@ impl FlexRenderer {
         log("Render: Pass 2 Reset");
         {
             let pass = command_encoder.begin_compute_pass();
-            pass.set_pipeline(self.pipeline_reset_signals.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -429,8 +411,8 @@ impl FlexRenderer {
         {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_height_bottom_up.is_none() { log("Pipeline height_bottom_up is None!"); }
-            pass.set_pipeline(self.pipeline_height_bottom_up.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_height_bottom_up.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -439,8 +421,8 @@ impl FlexRenderer {
         log("Render: Pass 3 Reset");
         {
              let pass = command_encoder.begin_compute_pass();
-             pass.set_pipeline(self.pipeline_reset_signals.as_ref().unwrap());
-             pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+             pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
+             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
              dispatch(&pass, workgroups);
              end_compute(&pass);
         }
@@ -450,8 +432,8 @@ impl FlexRenderer {
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_final_layout.is_none() { log("Pipeline final_layout is None!"); }
-            pass.set_pipeline(self.pipeline_final_layout.as_ref().unwrap());
-            pass.set_bind_group(0, self.bind_group_compute.as_ref().unwrap());
+            pass.set_pipeline_compute(self.pipeline_final_layout.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
@@ -473,9 +455,9 @@ impl FlexRenderer {
             let size = js_sys::Array::of2(&canvas_width.into(), &canvas_height.into());
             Reflect::set(&depth_desc, &"size".into(), &size).unwrap();
             Reflect::set(&depth_desc, &"format".into(), &"depth24plus".into()).unwrap();
-            Reflect::set(&depth_desc, &"usage".into(), &web_sys::GpuTextureUsage::RENDER_ATTACHMENT.into()).unwrap();
+            Reflect::set(&depth_desc, &"usage".into(), &GpuTextureUsage::RENDER_ATTACHMENT.into()).unwrap();
             
-            self.depth_texture = Some(self.device.create_texture(&depth_desc.unchecked_into()));
+            self.depth_texture = Some(self.device.create_texture(&depth_desc));
             self.depth_texture_width = canvas_width;
             self.depth_texture_height = canvas_height;
             log(&format!("Created Depth Texture: {}x{}", canvas_width, canvas_height));
@@ -514,128 +496,120 @@ impl FlexRenderer {
         
         log("Render: Set Pipeline");
         if self.pipeline_render.is_none() { log("CRITICAL: pipeline_render is None"); }
-        render_pass.set_pipeline(self.pipeline_render.as_ref().unwrap());
+        render_pass.set_pipeline_render(self.pipeline_render.as_ref().unwrap());
 
         log("Render: Set Bind Group");
         if self.bind_group_render.is_none() { log("CRITICAL: bind_group_render is None"); }
-        render_pass.set_bind_group(0, self.bind_group_render.as_ref().unwrap());
+        render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
         
         log("Render: Draw");
-        render_pass.draw_with_instance_count(6, node_count);
+        render_pass.draw_with_instance_count(6, node_count, 0, 0);
 
         // Draw Text
         let char_count = self.engine.get_character_count() as u32;
         if char_count > 0 {
             log("Render: Draw Text");
             if self.pipeline_render_text.is_none() { log("CRITICAL: pipeline_render_text is None"); }
-            render_pass.set_pipeline(self.pipeline_render_text.as_ref().unwrap());
-            render_pass.set_bind_group(0, self.bind_group_render.as_ref().unwrap());
-            render_pass.draw_with_instance_count(6, char_count);
+            render_pass.set_pipeline_render(self.pipeline_render_text.as_ref().unwrap());
+            render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
+            render_pass.draw_with_instance_count(6, char_count, 0, 0);
         }
 
         log("Render: End Pass");
         let end_render = |pass: &GpuRenderPassEncoder| {
-             let method = js_sys::Reflect::get(pass, &"end".into()).unwrap();
-             let func = method.dyn_into::<js_sys::Function>().unwrap();
-             func.call0(pass).unwrap();
+             pass.end_render();
         };
         end_render(&render_pass);
 
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
     }
 
-    pub async fn debug(&self) {
-        if self.nodes_buffer.is_none() || self.characters_buffer.is_none() || self.curve_buffer.is_none() || self.glyph_info_buffer.is_none() {
-            return;
-        }
+    pub fn debug(&self) -> Promise {
+        let device = self.device.unchecked_ref::<Object>().clone().unchecked_into::<GpuDevice>();
+        let nodes_buffer = self.nodes_buffer.as_ref().map(|b| b.unchecked_ref::<Object>().clone().unchecked_into::<GpuBuffer>());
+        let characters_buffer = self.characters_buffer.as_ref().map(|b| b.unchecked_ref::<Object>().clone().unchecked_into::<GpuBuffer>());
+        let curve_buffer = self.curve_buffer.as_ref().map(|b| b.unchecked_ref::<Object>().clone().unchecked_into::<GpuBuffer>());
+        let glyph_info_buffer = self.glyph_info_buffer.as_ref().map(|b| b.unchecked_ref::<Object>().clone().unchecked_into::<GpuBuffer>());
 
-        let nodes_buffer = self.nodes_buffer.as_ref().unwrap();
-        let characters_buffer = self.characters_buffer.as_ref().unwrap();
-        let curve_buffer = self.curve_buffer.as_ref().unwrap();
-        let glyph_info_buffer = self.glyph_info_buffer.as_ref().unwrap();
+        wasm_bindgen_futures::future_to_promise(async move {
+            if nodes_buffer.is_none() || characters_buffer.is_none() || curve_buffer.is_none() || glyph_info_buffer.is_none() {
+                return Ok(wasm_bindgen::JsValue::UNDEFINED);
+            }
 
-        let device = &self.device;
-        let command_encoder = device.create_command_encoder();
+            let nodes_buffer = nodes_buffer.unwrap();
+            let characters_buffer = characters_buffer.unwrap();
+            let curve_buffer = curve_buffer.unwrap();
+            let glyph_info_buffer = glyph_info_buffer.unwrap();
 
-        // Safe helper for size using Reflect
-        let get_size = |buffer: &GpuBuffer| -> f64 {
-             let val = Reflect::get(buffer, &"size".into()).unwrap();
-             val.as_f64().unwrap_or(0.0)
-        };
+            let command_encoder = device.create_command_encoder();
 
-        let create_read_buffer = |size: f64| -> GpuBuffer {
-             device.create_buffer(&GpuBufferDescriptor::new(
-                size,
-                web_sys::GpuBufferUsage::COPY_DST | web_sys::GpuBufferUsage::MAP_READ
-            ))
-        };
-        
-        let nodes_read = create_read_buffer(get_size(nodes_buffer));
-        let chars_read = create_read_buffer(get_size(characters_buffer));
-        let curve_read = create_read_buffer(get_size(curve_buffer));
-        let info_read = create_read_buffer(get_size(glyph_info_buffer));
+            // Safe helper for size using Reflect
+            let get_size = |buffer: &GpuBuffer| -> f64 {
+                 let val = Reflect::get(buffer, &"size".into()).unwrap();
+                 val.as_f64().unwrap_or(0.0)
+            };
 
-        // Reflected copy_buffer_to_buffer
-        let copy_buf = |src: &GpuBuffer, dst: &GpuBuffer, size: f64| {
-             let method = Reflect::get(&command_encoder, &"copyBufferToBuffer".into()).unwrap();
-             let func = method.dyn_into::<js_sys::Function>().unwrap();
-             // args: src, srcOffset, dst, dstOffset, size
-             func.call5(
-                 &command_encoder, 
-                 src, 
-                 &0.into(), 
-                 dst, 
-                 &0.into(), 
-                 &size.into()
-            ).unwrap();
-        };
+            let create_read_buffer = |size: f64| -> GpuBuffer {
+                 device.create_buffer(&GpuBufferDescriptor::new(
+                    size,
+                    GpuBufferUsage::COPY_DST | GpuBufferUsage::MAP_READ
+                ))
+            };
+            
+            let nodes_read = create_read_buffer(get_size(&nodes_buffer));
+            let chars_read = create_read_buffer(get_size(&characters_buffer));
+            let curve_read = create_read_buffer(get_size(&curve_buffer));
+            let info_read = create_read_buffer(get_size(&glyph_info_buffer));
 
-        copy_buf(nodes_buffer, &nodes_read, get_size(nodes_buffer));
-        copy_buf(characters_buffer, &chars_read, get_size(characters_buffer));
-        copy_buf(curve_buffer, &curve_read, get_size(curve_buffer));
-        copy_buf(glyph_info_buffer, &info_read, get_size(glyph_info_buffer));
+            command_encoder.copy_buffer_to_buffer(&nodes_buffer, 0.0, &nodes_read, 0.0, get_size(&nodes_buffer));
+            command_encoder.copy_buffer_to_buffer(&characters_buffer, 0.0, &chars_read, 0.0, get_size(&characters_buffer));
+            command_encoder.copy_buffer_to_buffer(&curve_buffer, 0.0, &curve_read, 0.0, get_size(&curve_buffer));
+            command_encoder.copy_buffer_to_buffer(&glyph_info_buffer, 0.0, &info_read, 0.0, get_size(&glyph_info_buffer));
 
-        device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
+            device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
 
-        // Map Async
-        let map_read = web_sys::GpuMapMode::READ;
-        let map = |buffer: &GpuBuffer| -> js_sys::Promise {
-             buffer.map_async(map_read)
-        };
+            // Map Async
+            let map_read = GpuMapMode::READ;
+            let map = |buffer: &GpuBuffer| -> Promise {
+                 buffer.map_async(map_read)
+            };
 
-        let _ = wasm_bindgen_futures::JsFuture::from(map(&nodes_read)).await;
-        let _ = wasm_bindgen_futures::JsFuture::from(map(&chars_read)).await;
-        let _ = wasm_bindgen_futures::JsFuture::from(map(&curve_read)).await;
-        let _ = wasm_bindgen_futures::JsFuture::from(map(&info_read)).await;
+            let _ = wasm_bindgen_futures::JsFuture::from(map(&nodes_read)).await;
+            let _ = wasm_bindgen_futures::JsFuture::from(map(&chars_read)).await;
+            let _ = wasm_bindgen_futures::JsFuture::from(map(&curve_read)).await;
+            let _ = wasm_bindgen_futures::JsFuture::from(map(&info_read)).await;
 
-        let read_f32 = |buffer: &GpuBuffer| -> Vec<f32> {
-             let range = buffer.get_mapped_range();
-             let f32_array = js_sys::Float32Array::new(&range);
-             let vec = f32_array.to_vec();
-             buffer.unmap();
-             vec
-        };
+            let read_f32 = |buffer: &GpuBuffer| -> Vec<f32> {
+                 let range = buffer.get_mapped_range();
+                 let f32_array = js_sys::Float32Array::new(&range);
+                 let vec = f32_array.to_vec();
+                 buffer.unmap();
+                 vec
+            };
 
-        let read_u32 = |buffer: &GpuBuffer| -> Vec<u32> {
-             let range = buffer.get_mapped_range();
-             let u32_array = js_sys::Uint32Array::new(&range);
-             let vec = u32_array.to_vec();
-             buffer.unmap();
-             vec
-        };
+            let read_u32 = |buffer: &GpuBuffer| -> Vec<u32> {
+                 let range = buffer.get_mapped_range();
+                 let u32_array = js_sys::Uint32Array::new(&range);
+                 let vec = u32_array.to_vec();
+                 buffer.unmap();
+                 vec
+            };
 
-        log("--- Debug GPU Buffers ---");
-        
-        let nodes = read_f32(&nodes_read);
-        log(&format!("Nodes (first 10): {:?}", nodes.iter().take(40).collect::<Vec<_>>())); 
+            log("--- Debug GPU Buffers ---");
+            
+            let nodes = read_f32(&nodes_read);
+            log(&format!("Nodes (first 10): {:?}", nodes.iter().take(40).collect::<Vec<_>>())); 
 
-        let chars_u32 = read_u32(&chars_read);
-        log(&format!("Chars (first 10): {:?}", chars_u32.iter().take(10).collect::<Vec<_>>()));
+            let chars_u32 = read_u32(&chars_read);
+            log(&format!("Chars (first 10): {:?}", chars_u32.iter().take(10).collect::<Vec<_>>()));
 
-        let curves = read_f32(&curve_read);
-        log(&format!("Curves (first 10): {:?}", curves.iter().take(20).collect::<Vec<_>>()));
+            let curves = read_f32(&curve_read);
+            log(&format!("Curves (first 10): {:?}", curves.iter().take(20).collect::<Vec<_>>()));
 
-        let info = read_u32(&info_read);
-        log(&format!("Glyph Info (first 10): {:?}", info.iter().take(10).collect::<Vec<_>>()));
+            let info = read_u32(&info_read);
+            log(&format!("Glyph Info (first 10): {:?}", info.iter().take(10).collect::<Vec<_>>()));
+
+            Ok(wasm_bindgen::JsValue::UNDEFINED)
+        })
     }
 }
