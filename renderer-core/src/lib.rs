@@ -219,6 +219,7 @@ pub struct Node {
     // --- Positioning ---
     pub top_offset: f32,
     pub left_offset: f32,
+    pub z_index: f32,
     pub position_mode: u32, // 0 = Relative, 1 = Absolute
     pub flex_direction: u32, // 0 = Row, 1 = Column
 
@@ -252,6 +253,7 @@ impl Node {
             color_a: 0.0,
             top_offset: 0.0,
             left_offset: 0.0,
+            z_index: 0.0,
             position_mode: 0,
             flex_direction: 0,
             parent_index: 0,
@@ -450,6 +452,12 @@ impl FlexEngine {
             node.position_mode = 1;
             node.top_offset = top;
             node.left_offset = left;
+        }
+    }
+
+    pub fn set_z_index(&mut self, node_index: u32, z_index: f32) {
+        if (node_index as usize) < self.nodes.len() {
+            self.nodes[node_index as usize].z_index = z_index;
         }
     }
 

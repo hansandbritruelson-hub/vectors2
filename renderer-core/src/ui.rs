@@ -42,6 +42,7 @@ pub fn build_ui(engine: &mut FlexEngine) {
     engine.set_parent(abs_item, main_content);
     engine.set_color(abs_item, 1.0, 0.2, 0.2, 1.0); // Red
     engine.set_fixed_width(abs_item, 100.0);
+    engine.set_z_index(abs_item, 100.0); // Top most
 
     // Set mainContent Children (Row 1, Row 2, Abs Item)
     // Note: Children must be contiguous indices [3, 4, 5]

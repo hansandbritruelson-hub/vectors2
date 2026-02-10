@@ -16,6 +16,7 @@ struct Node {
     
     top_offset: f32,
     left_offset: f32,
+    z_index: f32,
     position_mode: u32,
     flex_direction: u32,
 
@@ -93,9 +94,12 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     
     let ndc_x = (pos.x / uniforms.screen_width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (pos.y / uniforms.screen_height) * 2.0;
+
+    // Z-Index Mapping: 0..10000 -> 1.0..0.0 (Near is 0.0, Far is 1.0)
+    let z = 1.0 - (node.z_index / 10000.0);
     
     var out: VertexOutput;
-    out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
     out.local_pos = vec2<f32>(0.0, 0.0);
     out.glyph_index = 0u;
@@ -128,8 +132,11 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     let ndc_x = (pos.x / uniforms.screen_width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (pos.y / uniforms.screen_height) * 2.0;
 
+    // Text slightly in front of background (margin 0.0001)
+    let z = 1.0 - (node.z_index / 10000.0) - 0.0001;
+
     var out: VertexOutput;
-    out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+    out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // White Text
     out.local_pos = corner - vec2(1.0, 1.0);
     out.glyph_index = char.glyph_index;

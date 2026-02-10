@@ -16,6 +16,7 @@ struct Node {
     
     top_offset: f32,
     left_offset: f32,
+    z_index: f32,
     position_mode: u32,
     flex_direction: u32,
 

@@ -9,6 +9,8 @@ use web_sys::{
     GpuColorTargetState, GpuFragmentState,
     GpuRenderPassDescriptor, GpuRenderPassColorAttachment,
     GpuComputePassEncoder, GpuRenderPassEncoder,
+    GpuTexture, GpuTextureDescriptor, GpuTextureFormat,
+    GpuDepthStencilState, GpuRenderPassDepthStencilAttachment,
 };
 use crate::FlexEngine;
 use js_sys::{Object, Reflect};
@@ -30,6 +32,11 @@ pub struct FlexRenderer {
     engine: FlexEngine,
     device: GpuDevice,
     context: GpuCanvasContext,
+    
+    // Textures
+    depth_texture: Option<GpuTexture>,
+    depth_texture_width: u32,
+    depth_texture_height: u32,
 
     // Buffers
     nodes_buffer: Option<GpuBuffer>,
@@ -61,6 +68,9 @@ impl FlexRenderer {
             engine: FlexEngine::new(),
             device,
             context,
+            depth_texture: None,
+            depth_texture_width: 0,
+            depth_texture_height: 0,
             nodes_buffer: None,
             characters_buffer: None,
             glyph_buffer: None,
@@ -251,11 +261,18 @@ impl FlexRenderer {
 
             let fs_state = GpuFragmentState::new(fs_entry, &module_visual, &js_sys::Array::of1(&target));
             
+            // Depth Stencil State
+            let depth_state = js_sys::Object::new();
+            Reflect::set(&depth_state, &"format".into(), &"depth24plus".into()).unwrap();
+            Reflect::set(&depth_state, &"depthWriteEnabled".into(), &true.into()).unwrap();
+            Reflect::set(&depth_state, &"depthCompare".into(), &"less-equal".into()).unwrap();
+            
             // GpuRenderPipelineDescriptor
             let desc = js_sys::Object::new();
             Reflect::set(&desc, &"layout".into(), &layout_render).unwrap();
             Reflect::set(&desc, &"vertex".into(), &vs_state_obj).unwrap();
             Reflect::set(&desc, &"fragment".into(), &fs_state).unwrap();
+            Reflect::set(&desc, &"depthStencil".into(), &depth_state).unwrap(); // Add depth stencil
             
             // primitive
             let prim = js_sys::Object::new();
@@ -300,7 +317,7 @@ impl FlexRenderer {
         Ok(())
     }
 
-    pub fn render(&self) {
+    pub fn render(&mut self) {
         log("Render Start");
         if self.nodes_buffer.is_none() { 
             log("Render: skipping, no buffers");
@@ -443,6 +460,34 @@ impl FlexRenderer {
         log("Render: Render Pass Setup");
         let texture_view = self.context.get_current_texture().create_view();
         
+        // Depth Texture Management
+        let canvas_width = canvas.width();
+        let canvas_height = canvas.height();
+        
+        if self.depth_texture.is_none() || self.depth_texture_width != canvas_width || self.depth_texture_height != canvas_height {
+            if let Some(texture) = &self.depth_texture {
+                texture.destroy();
+            }
+            
+            let depth_desc = js_sys::Object::new();
+            let size = js_sys::Array::of2(&canvas_width.into(), &canvas_height.into());
+            Reflect::set(&depth_desc, &"size".into(), &size).unwrap();
+            Reflect::set(&depth_desc, &"format".into(), &"depth24plus".into()).unwrap();
+            Reflect::set(&depth_desc, &"usage".into(), &web_sys::GpuTextureUsage::RENDER_ATTACHMENT.into()).unwrap();
+            
+            self.depth_texture = Some(self.device.create_texture(&depth_desc.unchecked_into()));
+            self.depth_texture_width = canvas_width;
+            self.depth_texture_height = canvas_height;
+            log(&format!("Created Depth Texture: {}x{}", canvas_width, canvas_height));
+        }
+        
+        let depth_view = self.depth_texture.as_ref().unwrap().create_view();
+        let depth_attachment_obj = js_sys::Object::new();
+        Reflect::set(&depth_attachment_obj, &"view".into(), &depth_view).unwrap();
+        Reflect::set(&depth_attachment_obj, &"depthLoadOp".into(), &"clear".into()).unwrap();
+        Reflect::set(&depth_attachment_obj, &"depthStoreOp".into(), &"store".into()).unwrap();
+        Reflect::set(&depth_attachment_obj, &"depthClearValue".into(), &1.0.into()).unwrap();
+
         // Manual creation of descriptor object to ensure keys are correct
         let color_attachment_obj = js_sys::Object::new();
         Reflect::set(&color_attachment_obj, &"view".into(), &texture_view).unwrap();
@@ -460,6 +505,9 @@ impl FlexRenderer {
         log("Render: Pass Descriptor");
         // Cast object to GpuRenderPassColorAttachment for type safety in array (unchecked is fine)
         let render_pass_desc = GpuRenderPassDescriptor::new(&js_sys::Array::of1(&color_attachment_obj));
+        
+        // Attach Depth Stencil
+        Reflect::set(&render_pass_desc, &"depthStencilAttachment".into(), &depth_attachment_obj).unwrap();
         
         log("Render: Begin Pass");
         let render_pass = command_encoder.begin_render_pass(&render_pass_desc);
