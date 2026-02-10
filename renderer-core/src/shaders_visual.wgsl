@@ -1,5 +1,5 @@
 struct Node {
-    fixed_width: f32,
+    fixed_width: f32, // -1.0 = auto
     style_basis: f32,
     desired_width: f32,
     final_width: f32,
@@ -9,14 +9,24 @@ struct Node {
     final_x: f32,
     final_y: f32,
     
+    color_r: f32,
+    color_g: f32,
+    color_b: f32,
+    color_a: f32,
+    
+    top_offset: f32,
+    left_offset: f32,
+    position_mode: u32,
+    flex_direction: u32,
+
     parent_index: u32,
     child_start_index: u32,
     child_count: u32,
     signals_finished: u32,
     text_start: u32,
     text_length: u32,
-    flex_direction: u32,
     _pad0: u32,
+    _pad1: u32,
 };
 
 struct Character {
@@ -60,7 +70,7 @@ struct Uniforms {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) color: vec4<f32>,
     @location(1) local_pos: vec2<f32>,
     @location(2) @interpolate(flat) glyph_index: u32,
 };
@@ -86,7 +96,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-    out.color = vec3<f32>(0.2, 0.2, 0.2);
+    out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
     out.local_pos = vec2<f32>(0.0, 0.0);
     out.glyph_index = 0u;
     return out;
@@ -94,7 +104,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color, 1.0);
+    return in.color;
 }
 
 @vertex
@@ -120,7 +130,7 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
 
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-    out.color = vec3<f32>(1.0, 1.0, 1.0); // White Text
+    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // White Text
     out.local_pos = corner - vec2(1.0, 1.0);
     out.glyph_index = char.glyph_index;
     return out;
@@ -147,7 +157,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     
     let alpha = total_coverage / f32(SAMPLES * SAMPLES);
     if (alpha <= 0.001) { discard; }
-    return vec4<f32>(in.color, alpha);
+    return vec4<f32>(in.color.rgb, alpha * in.color.a);
 }
 
 fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {

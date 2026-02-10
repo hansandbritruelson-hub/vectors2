@@ -196,19 +196,31 @@ pub struct KerningRecord {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
-    // --- Layout Inputs (Style) ---
+    // --- Layout Inputs ---
     pub fixed_width: f32,   // -1.0 = auto
     pub style_basis: f32,
-
+    
     // --- Computed Values (Phase A - Width) ---
-    pub desired_width: f32, // Result of Pass 1
-    pub final_width: f32,   // Result of Pass 2
+    pub desired_width: f32,
+    pub final_width: f32,
 
     // --- Computed Values (Phase B - Height/Pos) ---
-    pub desired_height: f32, // Result of Pass 3
-    pub final_height: f32,   // Result of Pass 4
+    pub desired_height: f32,
+    pub final_height: f32,
     pub final_x: f32,
     pub final_y: f32,
+
+    // --- Visuals ---
+    pub color_r: f32,
+    pub color_g: f32,
+    pub color_b: f32,
+    pub color_a: f32,
+
+    // --- Positioning ---
+    pub top_offset: f32,
+    pub left_offset: f32,
+    pub position_mode: u32, // 0 = Relative, 1 = Absolute
+    pub flex_direction: u32, // 0 = Row, 1 = Column
 
     // --- Tree Topology ---
     pub parent_index: u32,
@@ -216,11 +228,11 @@ pub struct Node {
     pub child_count: u32,
     
     // --- Synchronization ---
-    pub signals_finished: u32, // Atomic counter for Bottom-Up
-    pub text_start: u32,       // Index into character buffer
-    pub text_length: u32,      // Length of the text content
-    pub flex_direction: u32,   // 0 = Row, 1 = Column
-    pub _padding: u32,         // Maintain 16-byte alignment
+    pub signals_finished: u32,
+    pub text_start: u32,
+    pub text_length: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
 }
 
 impl Node {
@@ -234,14 +246,22 @@ impl Node {
             final_height: 0.0,
             final_x: 0.0,
             final_y: 0.0,
+            color_r: 0.0,
+            color_g: 0.0,
+            color_b: 0.0,
+            color_a: 0.0,
+            top_offset: 0.0,
+            left_offset: 0.0,
+            position_mode: 0,
+            flex_direction: 0,
             parent_index: 0,
             child_start_index: 0,
             child_count: 0,
             signals_finished: 0,
             text_start: 0,
             text_length: 0,
-            flex_direction: 0,
-            _padding: 0,
+            _pad0: 0,
+            _pad1: 0,
         }
     }
 }
@@ -249,10 +269,10 @@ impl Node {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Character {
-    pub value: u32,      // unicode codepoint
-    pub glyph_index: u32, // glyph index in font
-    pub next_glyph_index: u32, // for kerning
-    pub node_index: u32, // owner node
+    pub value: u32,
+    pub glyph_index: u32,
+    pub next_glyph_index: u32,
+    pub node_index: u32,
 
     pub x: f32,
     pub y: f32,
@@ -410,6 +430,26 @@ impl FlexEngine {
     pub fn set_fixed_width(&mut self, node_index: u32, width: f32) {
         if (node_index as usize) < self.nodes.len() {
             self.nodes[node_index as usize].fixed_width = width;
+        }
+    }
+    
+    // New Setters
+    pub fn set_color(&mut self, node_index: u32, r: f32, g: f32, b: f32, a: f32) {
+        if (node_index as usize) < self.nodes.len() {
+            let node = &mut self.nodes[node_index as usize];
+            node.color_r = r;
+            node.color_g = g;
+            node.color_b = b;
+            node.color_a = a;
+        }
+    }
+
+    pub fn set_position_absolute(&mut self, node_index: u32, top: f32, left: f32) {
+        if (node_index as usize) < self.nodes.len() {
+            let node = &mut self.nodes[node_index as usize];
+            node.position_mode = 1;
+            node.top_offset = top;
+            node.left_offset = left;
         }
     }
 

@@ -9,14 +9,24 @@ struct Node {
     final_x: f32,
     final_y: f32,
     
+    color_r: f32,
+    color_g: f32,
+    color_b: f32,
+    color_a: f32,
+    
+    top_offset: f32,
+    left_offset: f32,
+    position_mode: u32,
+    flex_direction: u32,
+
     parent_index: u32,
     child_start_index: u32,
     child_count: u32,
     signals_finished: atomic<u32>,
     text_start: u32,
     text_length: u32,
-    flex_direction: u32, // 0 = Row, 1 = Column
     _pad0: u32,
+    _pad1: u32,
 };
 
 struct Character {
@@ -96,8 +106,6 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
         
         if (write_output) {
             characters[idx].x = cursor_x + glyph.bearing_x;
-            // The top of the character's bounding box is at:
-            // Line Top + Ascenter - BearingY
             characters[idx].y = cursor_y + font_ascender - glyph.bearing_y; 
             characters[idx].width = glyph.width;
             characters[idx].height = glyph.height;
@@ -165,11 +173,17 @@ fn process_node_width(id: u32) {
         
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
-                result_width = max(result_width, nodes[start + i].desired_width);
+                // POS ABSOLUTE CHECK
+                if (nodes[start + i].position_mode == 0u) {
+                    result_width = max(result_width, nodes[start + i].desired_width);
+                }
             }
         } else { // Row (Default)
             for (var i = 0u; i < count; i = i + 1u) {
-                result_width += nodes[start + i].desired_width;
+                 // POS ABSOLUTE CHECK
+                if (nodes[start + i].position_mode == 0u) {
+                    result_width += nodes[start + i].desired_width;
+                }
             }
         }
         nodes[id].desired_width = max(nodes[id].style_basis, result_width);
@@ -184,38 +198,42 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     
-    // We expect signals_finished to be:
-    // 0 = Parent not done
-    // 1 = I am done processing and can signal children
-
     let parent_id = nodes[id].parent_index;
     if (parent_id == id) {
         nodes[id].final_width = uniforms.screen_width;
         atomicStore(&nodes[id].signals_finished, 1u);
     } else {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
-            // Check Parent Direction
-            if (nodes[parent_id].flex_direction == 1u) { // Column
-                // In Column, children get the parent's final width
-                // UNLESS they have a fixed width
-                if (nodes[id].fixed_width >= 0.0) {
+            
+            if (nodes[id].position_mode == 1u) {
+                // Absolute: Use fixed or desired
+                 if (nodes[id].fixed_width >= 0.0) {
                     nodes[id].final_width = nodes[id].fixed_width;
-                } else {
-                    nodes[id].final_width = nodes[parent_id].final_width;
-                }
-            } else { // Row
-                if (nodes[id].fixed_width >= 0.0) {
-                    nodes[id].final_width = nodes[id].fixed_width;
-                } else {
-                    let parent_desired = nodes[parent_id].desired_width;
-                    let parent_final = nodes[parent_id].final_width;
-                    let my_desired = nodes[id].desired_width;
-                    
-                    if (parent_desired > 0.0) {
-                        let ratio = parent_final / parent_desired;
-                        nodes[id].final_width = my_desired * ratio;
+                 } else {
+                    nodes[id].final_width = nodes[id].desired_width;
+                 }
+            } else {
+                // Relative/Flex
+                if (nodes[parent_id].flex_direction == 1u) { // Column
+                    if (nodes[id].fixed_width >= 0.0) {
+                        nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        nodes[id].final_width = 0.0;
+                        nodes[id].final_width = nodes[parent_id].final_width;
+                    }
+                } else { // Row
+                    if (nodes[id].fixed_width >= 0.0) {
+                        nodes[id].final_width = nodes[id].fixed_width;
+                    } else {
+                        let parent_desired = nodes[parent_id].desired_width;
+                        let parent_final = nodes[parent_id].final_width;
+                        let my_desired = nodes[id].desired_width;
+                        
+                        if (parent_desired > 0.0) {
+                            let ratio = parent_final / parent_desired;
+                            nodes[id].final_width = my_desired * ratio;
+                        } else {
+                            nodes[id].final_width = 0.0;
+                        }
                     }
                 }
             }
@@ -259,7 +277,6 @@ fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 fn process_node_height(id: u32) {
     let count = nodes[id].child_count;
     if (count == 0u) {
-        // Pass 3: Layout text characters with wrapping and Write Coordinates
         let result = layout_text(id, nodes[id].final_width, true);
         nodes[id].desired_height = result.height;
     } else {
@@ -268,11 +285,15 @@ fn process_node_height(id: u32) {
         
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
-                 result_height += nodes[start + i].desired_height;
+                 if (nodes[start + i].position_mode == 0u) {
+                    result_height += nodes[start + i].desired_height;
+                 }
             }
         } else { // Row
             for (var i = 0u; i < count; i = i + 1u) {
-                result_height = max(result_height, nodes[start + i].desired_height);
+                if (nodes[start + i].position_mode == 0u) {
+                    result_height = max(result_height, nodes[start + i].desired_height);
+                }
             }
         }
         nodes[id].desired_height = result_height;
@@ -298,29 +319,42 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
             nodes[id].final_height = nodes[id].desired_height;
 
-            if (nodes[parent_id].flex_direction == 1u) { // Column
-                nodes[id].final_x = nodes[parent_id].final_x;
-                
-                var y_cursor = nodes[parent_id].final_y;
-                let start = nodes[parent_id].child_start_index;
-                
-                for (var i = start; i < id; i = i + 1u) {
-                    y_cursor += nodes[i].desired_height;
+            if (nodes[id].position_mode == 1u) { // Absolute
+                 nodes[id].final_x = nodes[parent_id].final_x + nodes[id].left_offset;
+                 nodes[id].final_y = nodes[parent_id].final_y + nodes[id].top_offset;
+            } else { // Relative
+                if (nodes[parent_id].flex_direction == 1u) { // Column
+                    nodes[id].final_x = nodes[parent_id].final_x;
+                    
+                    var y_cursor = nodes[parent_id].final_y;
+                    let start = nodes[parent_id].child_start_index;
+                    
+                    // Sum previous siblings only if they are relative
+                    for (var i = start; i < id; i = i + 1u) {
+                        if (nodes[i].position_mode == 0u) {
+                            y_cursor += nodes[i].desired_height;
+                        }
+                    }
+                    nodes[id].final_y = y_cursor;
+                    
+                } else { // Row
+                    nodes[id].final_y = nodes[parent_id].final_y;
+                    
+                    var x_cursor = nodes[parent_id].final_x;
+                    let start = nodes[parent_id].child_start_index;
+                    
+                     // Sum previous siblings only if they are relative
+                    for (var i = start; i < id; i = i + 1u) {
+                        if (nodes[i].position_mode == 0u) {
+                            x_cursor += nodes[i].final_width;
+                        }
+                    }
+                    nodes[id].final_x = x_cursor;
                 }
-                nodes[id].final_y = y_cursor;
-                
-            } else { // Row
-                nodes[id].final_y = nodes[parent_id].final_y;
-                
-                var x_cursor = nodes[parent_id].final_x;
-                let start = nodes[parent_id].child_start_index;
-                
-                for (var i = start; i < id; i = i + 1u) {
-                    x_cursor += nodes[i].final_width;
-                }
-                nodes[id].final_x = x_cursor;
             }
             atomicStore(&nodes[id].signals_finished, 1u);
         }
     }
 }
+
+
