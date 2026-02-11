@@ -27,6 +27,10 @@ struct Node {
     text_length: u32,
     flags: u32, // Bit 0 = Visible
     natural_content_width: f32,
+    
+    // --- Padding to 128 bytes ---
+    _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
+    _pad4: u32, _pad5: u32, _pad6: u32, _pad7: u32,
 };
 
 struct Character {
@@ -62,6 +66,8 @@ struct Uniforms {
     screen_height: f32,
     font_ascender: f32,
     line_height: f32,
+    node_count: f32,
+    _pad0: f32, _pad1: f32, _pad2: f32,
 };
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read> characters: array<Character>;

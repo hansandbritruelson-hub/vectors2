@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
-use tiny_skia::{Pixmap, Transform};
+// use tiny_skia::{Pixmap, Transform};
 // use usvg::{Options, Tree, FitTo};
 
 pub mod renderer;
@@ -187,6 +187,13 @@ pub struct GlyphData {
     pub bearing_y: f32,
     pub width: f32,   // Bounding box width
     pub height: f32,  // Bounding box height
+    // --- Padding to 32 bytes (16-byte alignment for stride) ---
+    pub _pad0: f32, pub _pad1: f32, pub _pad2: f32,
+}
+
+#[test]
+fn test_glyph_data_size() {
+    assert_eq!(std::mem::size_of::<GlyphData>(), 32);
 }
 
 #[repr(C)]
@@ -236,6 +243,15 @@ pub struct GpuNode {
     pub text_length: u32,
     pub flags: u32,       // Bit 0 = Visible
     pub natural_content_width: f32,
+
+    // --- Padding to 128 bytes ---
+    pub _pad0: u32, pub _pad1: u32, pub _pad2: u32, pub _pad3: u32,
+    pub _pad4: u32, pub _pad5: u32, pub _pad6: u32, pub _pad7: u32,
+}
+
+#[test]
+fn test_gpu_node_size() {
+    assert_eq!(std::mem::size_of::<GpuNode>(), 128);
 }
 
 impl GpuNode {
@@ -265,6 +281,8 @@ impl GpuNode {
             text_length: 0,
             flags: 1, // Default to 1 (Visible)
             natural_content_width: 0.0,
+            _pad0: 0, _pad1: 0, _pad2: 0, _pad3: 0,
+            _pad4: 0, _pad5: 0, _pad6: 0, _pad7: 0,
         }
     }
 }
@@ -417,7 +435,6 @@ impl FlexEngine {
         
         for id in 0..num_glyphs {
             let gid = GlyphId(id);
-            let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
             let bbox = face.glyph_bounding_box(gid).unwrap_or(ttf_parser::Rect { x_min: 0, y_min: 0, x_max: 0, y_max: 0 });
             
             // Generate Curves
@@ -435,12 +452,15 @@ impl FlexEngine {
                 _pad0: 0, _pad1: 0,
             });
 
+            let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
+            let rect = bbox; // Alias for clarity if needed, or just use bbox
             self.glyph_data.push(GlyphData {
                 advance,
                 bearing_x: bbox.x_min as f32 * scale - 1.0, // 1px padding
                 bearing_y: bbox.y_max as f32 * scale + 1.0,
                 width: (bbox.x_max - bbox.x_min) as f32 * scale + 2.0,
                 height: (bbox.y_max - bbox.y_min) as f32 * scale + 2.0,
+                _pad0: 0.0, _pad1: 0.0, _pad2: 0.0,
             });
         }
         
@@ -723,10 +743,13 @@ impl FlexEngine {
                 gpu_node.z_index = cpu_node.z_index.unwrap_or(parent_z);
                 
                 // Text Handling (Rebuild Characters)
-                if let Some(text) = &cpu_node.text {
+                if let Some(text_content) = &cpu_node.text {
                      let chars_start = self.characters.len() as u32;
-                     let chars_vec: Vec<char> = text.chars().collect();
+                     let chars_vec: Vec<char> = text_content.chars().collect();
                      let chars_len = chars_vec.len() as u32;
+                     
+                     log(&format!("--- DEBUG: Node {} text: {:?} ---", gpu_idx, cpu_node.text));
+                     log(&format!("  text_start: {}, text_length: {}", chars_start, chars_len));
                      
                      for (i, &c) in chars_vec.iter().enumerate() {
                         let val = c as u32;
@@ -741,6 +764,12 @@ impl FlexEngine {
                         } else { 0 };
             
                         self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, gpu_idx));
+                        
+                        if let Some(c_ref) = self.characters.last() {
+                            log(&format!("    Char '{}' (idx: {}): glyph={}, advance={}", 
+                                c, chars_start + i as u32, c_ref.glyph_index, 
+                                self.glyph_data[c_ref.glyph_index as usize].advance));
+                        }
                      }
                      
                      gpu_node.text_start = chars_start;
@@ -934,7 +963,7 @@ impl FlexEngine {
 }
 
 #[wasm_bindgen]
-pub fn render_svg(svg_content: &str, width: u32, height: u32) -> Vec<u8> {
+pub fn render_svg(_svg_content: &str, width: u32, height: u32) -> Vec<u8> {
     log(&format!("Rendering SVG (Disabled for migration): {}x{}", width, height));
     Vec::new()
     /*

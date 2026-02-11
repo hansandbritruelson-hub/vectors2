@@ -10,12 +10,11 @@ use crate::web_bindings::{
     GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor,
     GpuBufferBindingLayout, GpuBufferBindingType,
     GpuColorTargetState, GpuFragmentState,
-    GpuRenderPassDescriptor, GpuRenderPassColorAttachment,
-    GpuComputePassEncoder, GpuRenderPassEncoder,
-    GpuTexture, GpuTextureDescriptor, GpuTextureFormat,
-    GpuDepthStencilState, GpuRenderPassDepthStencilAttachment,
-    GpuBufferUsage, GpuTextureUsage, GpuShaderStage, GpuMapMode,
-    get_window, Window, HtmlCanvasElement, GpuSampler
+    GpuRenderPassDescriptor,
+    GpuComputePassEncoder,
+    GpuTexture, GpuTextureFormat,
+    GpuTextureUsage, GpuShaderStage,
+    get_window, HtmlCanvasElement
 };
 use crate::{FlexEngine, log};
 use js_sys::{Object, Reflect, Promise};
@@ -59,10 +58,17 @@ pub struct FlexRenderer {
 impl FlexRenderer {
     #[wasm_bindgen(constructor)]
     pub fn new(device: GpuDevice, context: GpuCanvasContext) -> FlexRenderer {
+        log(&format!("--- RENDERER STARTUP ---"));
+        log(&format!("GpuNode size: {} bytes", std::mem::size_of::<crate::GpuNode>()));
+        log(&format!("Character size: {} bytes", std::mem::size_of::<crate::Character>()));
+        log(&format!("GlyphData size: {} bytes", std::mem::size_of::<crate::GlyphData>()));
+
+        let engine = Rc::new(RefCell::new(FlexEngine::new()));
+
         FlexRenderer {
-            engine: Rc::new(RefCell::new(FlexEngine::new())),
             device,
             context,
+            engine,
             depth_texture: None,
             depth_texture_width: 0,
             depth_texture_height: 0,
@@ -141,7 +147,7 @@ impl FlexRenderer {
         self.glyph_buffer = Some(glyph_buf);
         
         self.uniform_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
-            16.0,
+            32.0, // Increased to 32 bytes for alignment (was 16)
             USAGE_UNIFORM | USAGE_COPY_DST
         )));
 
@@ -307,7 +313,13 @@ impl FlexRenderer {
             let line_gap = engine.get_line_gap();
             let _descender = engine.get_descender();
             let line_height = ascender - _descender + line_gap;
-            let uniform_data = vec![width, height, ascender, line_height];
+            let node_count = engine.get_node_count() as f32;
+            
+            // Pad to 32 bytes (8 floats)
+            let uniform_data = vec![
+                width, height, ascender, line_height, 
+                node_count, 0.0, 0.0, 0.0
+            ];
             unsafe {
                 std::slice::from_raw_parts(uniform_data.as_ptr() as *const u8, uniform_data.len() * 4).to_vec()
             }
@@ -319,8 +331,8 @@ impl FlexRenderer {
             &uniform_bytes
         );
 
-        let mut node_count = 0;
-        let mut char_count = 0;
+        let node_count: u32;
+        let char_count: u32;
 
         // Perform potentially destructive buffer updates (resizes)
         {
@@ -499,10 +511,60 @@ impl FlexRenderer {
         render_pass.end_render();
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
         self.engine.borrow_mut().mark_clean();
+        
+        // --- AUTOMATIC DEBUG TRIGGER ---
+        let _ = self.debug(); 
     }
 
     pub fn debug(&self) -> Promise {
-        wasm_bindgen_futures::future_to_promise(async move { Ok(wasm_bindgen::JsValue::UNDEFINED) })
+        let characters_buffer = self.characters_buffer.as_ref().unwrap().clone();
+        let device = self.device.clone();
+        Self::debug_internal(device, characters_buffer)
+    }
+
+    fn debug_internal(device: GpuDevice, characters_buffer: GpuBuffer) -> Promise {
+        wasm_bindgen_futures::future_to_promise(async move {
+            let size_val = Reflect::get(&characters_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0);
+            if size_val <= 0.0 {
+                 return Ok(wasm_bindgen::JsValue::UNDEFINED);
+            }
+
+            // Create staging buffer (WebGPU requires staging for MapRead on Storage)
+            // 0x0001 = MAP_READ, 0x0008 = COPY_DST
+            let staging_buf = device.create_buffer(&crate::web_bindings::GpuBufferDescriptor::new(size_val, 0x0001 | 0x0008));
+            
+            let encoder = device.create_command_encoder();
+            encoder.copy_buffer_to_buffer(&characters_buffer, 0.0, &staging_buf, 0.0, size_val);
+            device.queue().submit(&js_sys::Array::of1(&encoder.finish()));
+
+            let promise = staging_buf.map_async(0x0001); // MAP_READ
+            wasm_bindgen_futures::JsFuture::from(promise).await?;
+            
+            let array_buffer = staging_buf.get_mapped_range();
+            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+            let vec = uint8_array.to_vec();
+            staging_buf.unmap();
+            staging_buf.destroy();
+            
+            // Reconstruct Character structs from bytes
+            let char_size = std::mem::size_of::<crate::Character>();
+            let count = vec.len() / char_size;
+            log(&format!("--- GPU DEBUG: Character Read-back (count: {}) ---", count));
+            
+            for i in 0..count {
+                let offset = i * char_size;
+                if offset + char_size > vec.len() { break; }
+                let char_ptr = unsafe { vec.as_ptr().add(offset) } as *const crate::Character;
+                let c = unsafe { &*char_ptr };
+                
+                if c.value != 0 {
+                    log(&format!("  Char[{}] val: '{}' (u32: {}), node: {}, x: {:.2}, y: {:.2}, w: {:.2}, h: {:.2}", 
+                        i, std::char::from_u32(c.value).unwrap_or('?'), c.value, c.node_index, c.x, c.y, c.width, c.height));
+                }
+            }
+            
+            Ok(wasm_bindgen::JsValue::UNDEFINED)
+        })
     }
 
     fn rebind_all(&mut self) {

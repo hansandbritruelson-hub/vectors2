@@ -1,5 +1,5 @@
 use crate::FlexEngine;
-use crate::signals::{Signal, ReadSignal, create_effect};
+use crate::signals::{ReadSignal, create_effect};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;

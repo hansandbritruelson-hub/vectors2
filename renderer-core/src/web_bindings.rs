@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use js_sys::{Object, Reflect, Float32Array, Uint32Array};
+use js_sys::{Object, Reflect};
 
 #[wasm_bindgen(inline_js = "export function get_window() { return window; }")]
 extern "C" {
@@ -31,38 +31,55 @@ extern "C" {
 
     // WebGPU Core
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuDevice;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuQueue;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuBuffer;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuTexture;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuTextureView;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuSampler;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuShaderModule;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuBindGroupLayout;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuBindGroup;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuPipelineLayout;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuComputePipeline;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuRenderPipeline;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuCommandEncoder;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuComputePassEncoder;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuRenderPassEncoder;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuCommandBuffer;
     #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
     pub type GpuCanvasContext;
 
     // GpuDevice methods

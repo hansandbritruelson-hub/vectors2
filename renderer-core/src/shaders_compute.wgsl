@@ -27,6 +27,10 @@ struct Node {
     text_length: u32,
     flags: u32, // Bit 0 = Visible
     natural_content_width: f32,
+    
+    // --- Padding to 128 bytes ---
+    _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
+    _pad4: u32, _pad5: u32, _pad6: u32, _pad7: u32,
 };
 
 struct Character {
@@ -46,6 +50,8 @@ struct Uniforms {
     screen_height: f32,
     font_ascender: f32,
     line_height: f32,
+    node_count: f32,
+    _pad0: f32, _pad1: f32, _pad2: f32,
 };
 
 struct GlyphData {
@@ -54,6 +60,8 @@ struct GlyphData {
     bearing_y: f32,
     width: f32,
     height: f32,
+    // --- Padding to 32 bytes ---
+    _pad0: f32, _pad1: f32, _pad2: f32,
 };
 
 @group(0) @binding(0) var<storage, read_write> nodes: array<Node>;
@@ -64,7 +72,7 @@ struct GlyphData {
 @compute @workgroup_size(64)
 fn reset_signals(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let id = global_id.x;
-    if (id >= arrayLength(&nodes)) {
+    if (id >= u32(uniforms.node_count)) {
         return;
     }
     atomicStore(&nodes[id].signals_finished, 0u);
@@ -123,7 +131,7 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
 @compute @workgroup_size(64)
 fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let node_id = global_id.x;
-    if (node_id >= arrayLength(&nodes)) {
+    if (node_id >= u32(uniforms.node_count)) {
         return;
     }
 
@@ -202,7 +210,7 @@ fn process_node_width(id: u32) {
 @compute @workgroup_size(64)
 fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let id = global_id.x;
-    if (id >= arrayLength(&nodes)) {
+    if (id >= u32(uniforms.node_count)) {
         return;
     }
     
@@ -250,7 +258,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let node_id = global_id.x;
-    if (node_id >= arrayLength(&nodes)) {
+    if (node_id >= u32(uniforms.node_count)) {
         return;
     }
 
@@ -314,7 +322,7 @@ fn process_node_height(id: u32) {
 @compute @workgroup_size(64)
 fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let id = global_id.x;
-    if (id >= arrayLength(&nodes)) {
+    if (id >= u32(uniforms.node_count)) {
         return;
     }
     
