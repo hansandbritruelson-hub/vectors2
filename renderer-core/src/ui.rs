@@ -199,120 +199,15 @@ where
 // --- UI Construction ---
 
 pub fn build_ui(engine: Rc<RefCell<FlexEngine>>) {
-    let (sidebar_content, set_sidebar_content) = crate::signals::create_signal("SIDEBAR\n(Reactive)".to_string());
-    
-    // Test dynamic list of objects with keys
-    #[derive(Clone)]
-    struct User { id: String, name: String }
-    
-    let (users, set_users) = crate::signals::create_signal(vec![
-        User { id: "1".into(), name: "Alice".into() },
-        User { id: "2".into(), name: "Bob".into() },
-    ]);
+    // Call the generated UI
+    crate::generated_ui::app::build_generated_ui(engine.clone());
 
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::prelude::*;
-        use wasm_bindgen::JsCast;
-        
-        let mut count = 0;
-        let closure = Closure::wrap(Box::new(move || {
-            count += 1;
-            set_sidebar_content.set(format!("SIDEBAR\nTick: {}", count));
-            
-            // Toggle list content to demo keyed reuse
-            if count % 2 == 0 {
-                set_users.set(vec![
-                    User { id: "1".into(), name: "Alice".into() },
-                    User { id: "3".into(), name: format!("New User {}", count) },
-                    User { id: "2".into(), name: "Bob (Moved)".into() },
-                ]);
-            } else {
-                set_users.set(vec![
-                    User { id: "2".into(), name: "Bob".into() },
-                    User { id: "1".into(), name: "Alice".into() },
-                ]);
-            }
-        }) as Box<dyn FnMut()>);
-        
-        if let Some(window) = crate::web_bindings::get_window() {
-            window.set_interval(closure.as_ref().unchecked_ref(), 2000);
-        }
-        closure.forget();
-    }
-
-    // --- Root layout: Sidebar (Left) + Content (Right) ---
-    // Root defaults to 100% VP width/height via shader logic.
-    let root = div().row().color(0.1, 0.1, 0.1, 1.0)
-        .child(
-            div().col().width(75.0).color(0.2, 0.2, 0.25, 1.0)
-            .bind_text(sidebar_content)
-            .child(
-                 // Paintbrush Icon
-                 div().width(64.0).height(64.0).image("paintbrush.svg")
-            )
-            .child(
-                 // Pencil Icon
-                 div().width(64.0).height(64.0).image("paintbrush.svg") // Reusing same asset for now
-            )
-        )
-        .build(engine.clone(), None);
-    
-    // Trigger Image Download / Asset Load
+    // Trigger Asset Loads for images used in the template
     {
         let engine_clone = engine.clone();
         spawn_local(async move {
-            // Existing test image (commented out to show assets)
-            // crate::load_image_to_engine(engine_clone.clone(), "test.png".to_string()).await;
-            
             // Load Asset
-            // Note: Current engine only supports ONE global texture. 
-            // The last loaded image will be applied to ALL nodes with flags(3).
             crate::load_image_to_engine(engine_clone, "asset:paintbrush.svg".to_string()).await;
         });
     }
-
-    // --- Right Pane: Column Layout ---
-    let right_pane = div().col().color(0.15, 0.15, 0.15, 1.0)
-        .build(engine.clone(), Some(root));
-
-    // --- Row 1: Two divs with sample text ---
-    let row1 = div().row().color(0.2, 0.2, 0.2, 1.0)
-        .build(engine.clone(), Some(right_pane));
-    
-    div().color(0.3, 0.3, 0.35, 1.0).child(text("Row 1 - Left Div"))
-        .build(engine.clone(), Some(row1));
-    div().color(0.35, 0.3, 0.3, 1.0).child(text("Row 1 - Right Div"))
-        .build(engine.clone(), Some(row1));
-
-    // --- Row 2: Two divs with long sample text (wrapping) ---
-    let row2 = div().row().color(0.2, 0.25, 0.2, 1.0)
-        .build(engine.clone(), Some(right_pane));
-
-    let long_text_1 = "This is a reasonably long piece of text that is intended to test the wrapping capabilities of our flex engine. It should flow nicely within its container.";
-    let long_text_2 = "Another long block of text here, serving as the second part of Row 2. We want to ensure that multiple wrapping blocks can coexist side-by-side in a row.";
-
-    div().color(0.25, 0.35, 0.25, 1.0).child(text(long_text_1))
-        .build(engine.clone(), Some(row2));
-    div().color(0.25, 0.25, 0.35, 1.0).child(text(long_text_2))
-        .build(engine.clone(), Some(row2));
-
-    // --- Row 3: Container for List (v4 Sample) ---
-    let row3 = div().col().color(0.1, 0.1, 0.1, 1.0)
-        .build(engine.clone(), Some(right_pane));
-
-    div().text("Row 3: Keyed Reusable List (v4 Sample):")
-        .build(engine.clone(), Some(row3));
-
-    mount_list(engine.clone(), row3, users, |u| u.id.clone(), |u| {
-        div().min_width(40.0).color(0.3, 0.7, 0.3, 1.0)
-            .child(text(&u.name))
-    });
-
-    // --- Absolute Block: Red positioned block ---
-    div().width(100.0).min_width(100.0).color(1.0, 0.0, 0.0, 1.0)
-        .absolute(50.0, 450.0)
-        .z(100.0)
-        .child(text("ABSOLUTE"))
-        .build(engine.clone(), Some(root));
 }

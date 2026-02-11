@@ -47,4 +47,32 @@ fn main() {
     
     // Rerun if assets change
     println!("cargo:rerun-if-changed=assets");
+
+    // --- UI Compiler Automation ---
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let root_dir = Path::new(&manifest_dir).parent().unwrap();
+    let template_path = root_dir.join("templates").join("App.vue");
+    let output_path = Path::new(&manifest_dir).join("src").join("generated_ui").join("app.rs");
+    
+    // Check if ui-compiler exists and is built. 
+    // Usually we'd want to build it if it's not there, but for a build.rs, 
+    // we can just try to run it.
+    let compiler_path = root_dir.join("target").join("debug").join("ui-compiler");
+    
+    if template_path.exists() && compiler_path.exists() {
+        let status = std::process::Command::new(compiler_path)
+            .arg(&template_path)
+            .arg("-o")
+            .arg(&output_path)
+            .status()
+            .expect("Failed to execute ui-compiler");
+        
+        if status.success() {
+            println!("cargo:warning=Successfully recompiled UI template: {}", template_path.display());
+        } else {
+            println!("cargo:warning=UI Compiler failed for template: {}", template_path.display());
+        }
+    }
+
+    println!("cargo:rerun-if-changed={}", template_path.display());
 }

@@ -1,0 +1,8 @@
+[workspace]
+
+members = [
+    "renderer-core",
+    "ui-compiler",
+]
+
+resolver = "2"

@@ -13,6 +13,7 @@ pub mod ui;
 pub mod web_bindings;
 pub mod signals;
 pub mod texture_atlas;
+pub mod generated_ui;
 #[cfg(test)]
 mod tests;
 pub use renderer::FlexRenderer;
