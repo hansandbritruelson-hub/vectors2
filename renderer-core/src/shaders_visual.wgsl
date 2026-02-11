@@ -1,6 +1,7 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
     min_width: f32,
+    fixed_height: f32, // -1.0 = auto
     final_width: f32,
     
     desired_height: f32,
@@ -30,7 +31,7 @@ struct Node {
     
     // --- Padding to 128 bytes ---
     _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
-    _pad4: u32, _pad5: u32, _pad6: u32, _pad7: u32,
+    _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
 };
 
 struct Character {
@@ -73,12 +74,15 @@ struct Uniforms {
 @group(0) @binding(2) var<storage, read> characters: array<Character>;
 @group(0) @binding(3) var<storage, read> curves: array<Curve>;
 @group(0) @binding(4) var<storage, read> glyph_infos: array<GlyphInfo>;
+@group(0) @binding(5) var t_diffuse: texture_2d<f32>;
+@group(0) @binding(6) var s_diffuse: sampler;
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) local_pos: vec2<f32>,
     @location(2) @interpolate(flat) glyph_index: u32,
+    @location(3) @interpolate(flat) flags: u32,
 };
 
 @vertex
@@ -93,17 +97,19 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     }
 
     var pos = vec2<f32>(0.0, 0.0);
+    var uv = vec2<f32>(0.0, 0.0);
+
     let x1 = node.final_x;
     let y1 = node.final_y;
     let x2 = node.final_x + node.final_width;
     let y2 = node.final_y + node.final_height;
     
-    if (vertex_index == 0u) { pos = vec2<f32>(x1, y1); }
-    else if (vertex_index == 1u) { pos = vec2<f32>(x2, y1); }
-    else if (vertex_index == 2u) { pos = vec2<f32>(x1, y2); }
-    else if (vertex_index == 3u) { pos = vec2<f32>(x1, y2); }
-    else if (vertex_index == 4u) { pos = vec2<f32>(x2, y1); }
-    else if (vertex_index == 5u) { pos = vec2<f32>(x2, y2); }
+    if (vertex_index == 0u) { pos = vec2<f32>(x1, y1); uv = vec2<f32>(0.0, 0.0); }
+    else if (vertex_index == 1u) { pos = vec2<f32>(x2, y1); uv = vec2<f32>(1.0, 0.0); }
+    else if (vertex_index == 2u) { pos = vec2<f32>(x1, y2); uv = vec2<f32>(0.0, 1.0); }
+    else if (vertex_index == 3u) { pos = vec2<f32>(x1, y2); uv = vec2<f32>(0.0, 1.0); }
+    else if (vertex_index == 4u) { pos = vec2<f32>(x2, y1); uv = vec2<f32>(1.0, 0.0); }
+    else if (vertex_index == 5u) { pos = vec2<f32>(x2, y2); uv = vec2<f32>(1.0, 1.0); }
     
     let ndc_x = (pos.x / uniforms.screen_width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (pos.y / uniforms.screen_height) * 2.0;
@@ -114,13 +120,20 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
-    out.local_pos = vec2<f32>(0.0, 0.0);
+    out.local_pos = uv;
     out.glyph_index = 0u;
+    out.flags = node.flags;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Check if Image Flag (Bit 1 = Value 2) is set
+    if ((in.flags & 2u) != 0u) {
+        let tex_color = textureSampleLevel(t_diffuse, s_diffuse, in.local_pos, 0.0);
+        return tex_color;
+        // Optionally mix with background color? For now just replace.
+    }
     return in.color;
 }
 

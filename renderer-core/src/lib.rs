@@ -1,5 +1,9 @@
 use wasm_bindgen::prelude::*;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use wasm_bindgen_futures::JsFuture;
+use image::io::Reader as ImageReader;
+use std::io::Cursor;
+use crate::web_bindings::download_image;
 // use tiny_skia::{Pixmap, Transform};
 // use usvg::{Options, Tree, FitTo};
 
@@ -211,6 +215,7 @@ pub struct GpuNode {
     // --- Layout Inputs ---
     pub fixed_width: f32,   // -1.0 = auto
     pub min_width: f32,
+    pub fixed_height: f32,  // -1.0 = auto
     
     // --- Computed Values ---
     pub final_width: f32,
@@ -246,7 +251,7 @@ pub struct GpuNode {
 
     // --- Padding to 128 bytes ---
     pub _pad0: u32, pub _pad1: u32, pub _pad2: u32, pub _pad3: u32,
-    pub _pad4: u32, pub _pad5: u32, pub _pad6: u32, pub _pad7: u32,
+    pub _pad4: u32, pub _pad5: u32, pub _pad6: u32, // Removed pad7 due to fixed_height
 }
 
 #[test]
@@ -259,6 +264,7 @@ impl GpuNode {
         Self {
             fixed_width: -1.0,
             min_width: 0.0,
+            fixed_height: -1.0,
             final_width: 0.0,
             desired_height: 0.0,
             final_height: 0.0,
@@ -282,7 +288,7 @@ impl GpuNode {
             flags: 1, // Default to 1 (Visible)
             natural_content_width: 0.0,
             _pad0: 0, _pad1: 0, _pad2: 0, _pad3: 0,
-            _pad4: 0, _pad5: 0, _pad6: 0, _pad7: 0,
+            _pad4: 0, _pad5: 0, _pad6: 0,
         }
     }
 }
@@ -299,6 +305,7 @@ pub struct CpuNode {
     // Properties (Mirrored from GpuNode Inputs)
     pub fixed_width: f32,
     pub min_width: f32,
+    pub fixed_height: f32,
     pub color: (f32, f32, f32, f32),
     pub top_offset: f32,
     pub left_offset: f32,
@@ -321,6 +328,7 @@ impl CpuNode {
             
             fixed_width: -1.0,
             min_width: 0.0,
+            fixed_height: -1.0,
             color: (0.0, 0.0, 0.0, 0.0),
             top_offset: 0.0,
             left_offset: 0.0,
@@ -386,6 +394,16 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
 
+    // --- Image Support ---
+    #[wasm_bindgen(skip)]
+    pub image_width: u32,
+    #[wasm_bindgen(skip)]
+    pub image_height: u32,
+    #[wasm_bindgen(skip)]
+    pub image_data: Vec<u8>,
+    #[wasm_bindgen(skip)]
+    pub image_dirty: bool,
+
     pub dirty: bool,
 }
 
@@ -407,6 +425,10 @@ impl FlexEngine {
             descender: 0.0,
             line_gap: 0.0,
             face: None,
+            image_width: 0,
+            image_height: 0,
+            image_data: Vec::new(),
+            image_dirty: false,
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -466,6 +488,21 @@ impl FlexEngine {
         
         self.face = Some(face);
     }
+    
+
+
+// ...
+
+    // Returns true if image data was updated
+    pub fn set_image_data(&mut self, width: u32, height: u32, data: Vec<u8>) {
+        self.image_width = width;
+        self.image_height = height;
+        self.image_data = data;
+        self.image_dirty = true;
+        self.mark_dirty();
+        log(&format!("Image loaded into engine: {}x{}", width, height));
+    }
+
 
     pub fn add_node(&mut self, min_width: f32) -> u32 {
         let mut node = CpuNode::new();
@@ -599,6 +636,12 @@ impl FlexEngine {
         self.mark_dirty();
     }
     
+    // --- Topology Management (Linked List Wiring) ---
+
+    // ... (existing topology methods)
+
+
+
     // Deprecated / No-op in linked list mode (implicit)
     pub fn set_child_start(&mut self, _parent_index: u32, _start_index: u32) {
         // No-op
@@ -723,6 +766,7 @@ impl FlexEngine {
                 // Mirror Props
                 gpu_node.fixed_width = cpu_node.fixed_width;
                 gpu_node.min_width = cpu_node.min_width;
+                gpu_node.fixed_height = cpu_node.fixed_height;
                 gpu_node.color_r = cpu_node.color.0;
                 gpu_node.color_g = cpu_node.color.1;
                 gpu_node.color_b = cpu_node.color.2;
@@ -789,6 +833,20 @@ impl FlexEngine {
     pub fn set_fixed_width(&mut self, node_index: u32, width: f32) {
         if (node_index as usize) < self.cpu_nodes.len() {
             self.cpu_nodes[node_index as usize].fixed_width = width;
+            self.mark_dirty();
+        }
+    }
+    
+    pub fn set_fixed_height(&mut self, node_index: u32, height: f32) {
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].fixed_height = height;
+            self.mark_dirty();
+        }
+    }
+
+    pub fn set_flags(&mut self, node_index: u32, flags: u32) {
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].flags = flags;
             self.mark_dirty();
         }
     }
@@ -970,4 +1028,33 @@ pub fn render_svg(_svg_content: &str, width: u32, height: u32) -> Vec<u8> {
     let opt = Options::default();
     // ... (rest of the code)
     */
+}
+
+pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEngine>>, url: String) {
+    // log(&format!("Downloading image: {}", url));
+    let promise = crate::web_bindings::download_image(&url);
+    let js_val = wasm_bindgen_futures::JsFuture::from(promise).await;
+    
+    if let Ok(val) = js_val {
+        let uint8_array = js_sys::Uint8Array::new(&val);
+        let bytes = uint8_array.to_vec();
+        
+        let img = image::load_from_memory(&bytes);
+        match img {
+            Ok(dynamic_img) => {
+                let rgba = dynamic_img.to_rgba8();
+                let w = rgba.width();
+                let h = rgba.height();
+                let data = rgba.into_raw();
+                
+                // Only now acquire the lock
+                engine.borrow_mut().set_image_data(w, h, data);
+            },
+            Err(e) => {
+                 log(&format!("Failed to decode image: {:?}", e));
+            }
+        }
+    } else {
+        log("Failed to download image");
+    }
 }

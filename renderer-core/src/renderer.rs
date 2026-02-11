@@ -14,10 +14,11 @@ use crate::web_bindings::{
     GpuComputePassEncoder,
     GpuTexture, GpuTextureFormat,
     GpuTextureUsage, GpuShaderStage,
+    GpuSampler, GpuSamplerDescriptor, GpuTextureDescriptor, GpuExtent3D, GpuImageCopyTexture, GpuImageDataLayout,
     get_window, HtmlCanvasElement
 };
-use crate::{FlexEngine, log};
 use js_sys::{Object, Reflect, Promise};
+use crate::{FlexEngine, log};
 
 const SHADER_COMPUTE: &str = include_str!("shaders_compute.wgsl");
 const SHADER_VISUAL: &str = include_str!("shaders_visual.wgsl");
@@ -38,6 +39,10 @@ pub struct FlexRenderer {
     uniform_buffer: Option<GpuBuffer>,
     curve_buffer: Option<GpuBuffer>,
     glyph_info_buffer: Option<GpuBuffer>,
+
+    // Image Resources
+    test_texture: Option<GpuTexture>,
+    sampler: Option<GpuSampler>,
 
     pipeline_reset_signals: Option<GpuComputePipeline>,
     pipeline_bottom_up: Option<GpuComputePipeline>,
@@ -85,15 +90,18 @@ impl FlexRenderer {
             pipeline_final_layout: None,
             pipeline_render: None,
             pipeline_render_text: None,
+
             bind_group_compute: None,
             bind_group_render: None,
             bind_group_layout_compute: None,
             bind_group_layout_render: None,
+            test_texture: None,
+            sampler: None,
         }
     }
 
     pub fn init(&mut self) -> Result<(), wasm_bindgen::JsValue> {
-        log("Rust Renderer Initializing...");
+        // log("Rust Renderer Initializing...");
 
         crate::ui::build_ui(self.engine.clone());
 
@@ -193,13 +201,16 @@ impl FlexRenderer {
             &make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage),
         ))));
 
-        self.bind_group_layout_render = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of5(
-            &make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage),
-            &make_layout_entry(1, GpuShaderStage::VERTEX, GpuBufferBindingType::Uniform),
-            &make_layout_entry(2, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage),
-            &make_layout_entry(3, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage),
-            &make_layout_entry(4, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage),
-        ))));
+        let layout_entries = js_sys::Array::new();
+        layout_entries.push(&make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage));
+        layout_entries.push(&make_layout_entry(1, GpuShaderStage::VERTEX, GpuBufferBindingType::Uniform));
+        layout_entries.push(&make_layout_entry(2, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage));
+        layout_entries.push(&make_layout_entry(3, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage));
+        layout_entries.push(&make_layout_entry(4, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage));
+        layout_entries.push(&GpuBindGroupLayoutEntry::new_texture(5, GpuShaderStage::FRAGMENT)); // Texture
+        layout_entries.push(&GpuBindGroupLayoutEntry::new_sampler(6, GpuShaderStage::FRAGMENT)); // Sampler
+
+        self.bind_group_layout_render = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&layout_entries)));
 
         let layout_compute = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(self.bind_group_layout_compute.as_ref().unwrap())));
         let layout_render = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(self.bind_group_layout_render.as_ref().unwrap())));
@@ -256,6 +267,23 @@ impl FlexRenderer {
         self.pipeline_render = Some(create_render("vs_main", "fs_main"));
         self.pipeline_render_text = Some(create_render("vs_text", "fs_text"));
 
+        // Texture & Sampler Setup
+        self.sampler = Some(self.device.create_sampler(Some(GpuSamplerDescriptor::new())));
+        
+        // create placeholder texture
+        let size = js_sys::Array::of2(&1u32.into(), &1u32.into());
+        let tex_desc = GpuTextureDescriptor::new(&size, "rgba8unorm", GpuTextureUsage::TEXTURE_BINDING | GpuTextureUsage::COPY_DST | GpuTextureUsage::RENDER_ATTACHMENT);
+        let placeholder_tex = self.device.create_texture(&tex_desc);
+        
+        // Upload white pixel
+        let white_pixel = [255u8, 255u8, 255u8, 255u8];
+        let layout = GpuImageDataLayout::new(4, 1);
+        let extent = GpuExtent3D::new(1, 1);
+        let dest = GpuImageCopyTexture::new(&placeholder_tex);
+        self.device.queue().write_texture_with_u8_array(&dest, &white_pixel, &layout, &extent);
+        
+        self.test_texture = Some(placeholder_tex);
+
         let make_buffer_binding = |buffer: &GpuBuffer| -> Object {
              let obj = Object::new();
              Reflect::set(&obj, &"buffer".into(), buffer).unwrap();
@@ -272,18 +300,26 @@ impl FlexRenderer {
             self.bind_group_layout_compute.as_ref().unwrap(),
         )));
 
+
+        let entries = js_sys::Array::new();
+        entries.push(&GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())));
+        
+        let tex_view: Object = self.test_texture.as_ref().unwrap().create_view().into();
+        entries.push(&GpuBindGroupEntry::new(5, &tex_view));
+        
+        let sampler: Object = self.sampler.as_ref().unwrap().clone().into();
+        entries.push(&GpuBindGroupEntry::new(6, &sampler));
+
         self.bind_group_render = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &js_sys::Array::of5(
-                &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())),
-            ),
+            &entries,
             self.bind_group_layout_render.as_ref().unwrap(),
         )));
 
-        log("Rust Renderer Init Complete");
+        // log("Rust Renderer Init Complete");
         drop(engine);
         self.engine.borrow_mut().mark_dirty();
         Ok(())
@@ -291,13 +327,14 @@ impl FlexRenderer {
 
     pub fn render(&mut self) {
         if !self.engine.borrow().is_dirty() {
+            // log("Render: skipping, no dirty");
             return;
         }
 
         self.engine.borrow_mut().render();
 
         if self.nodes_buffer.is_none() { 
-            log("Render: skipping, no buffers");
+            // log("Render: skipping, no buffers");
             return; 
         }
 
@@ -344,7 +381,7 @@ impl FlexRenderer {
             let nodes_buffer_size = Reflect::get(current_nodes_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
             
             if nodes_byte_length > nodes_buffer_size {
-                 log(&format!("Resizing nodes_buffer from {} to {}", nodes_buffer_size, nodes_byte_length));
+                 // log(&format!("Resizing nodes_buffer from {} to {}", nodes_buffer_size, nodes_byte_length));
                  let new_nodes_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
                       nodes_byte_length as f64,
                       0x0080 | 0x0008 | 0x0004
@@ -381,6 +418,48 @@ impl FlexRenderer {
                  drop(engine);
                  self.rebind_all();
             }
+        }
+        
+        // Texture Updates
+        let mut rebind_needed = false;
+        {
+            let mut engine = self.engine.borrow_mut();
+            if engine.image_dirty {
+                // log("Renderer: Detected dirty image. Uploading...");
+                let width = engine.image_width;
+                let height = engine.image_height;
+                let data = &engine.image_data;
+                
+                if width > 0 && height > 0 && !data.is_empty() {
+                    // Create new texture
+                    let size = js_sys::Array::of2(&width.into(), &height.into());
+                    let tex_desc = GpuTextureDescriptor::new(&size, "rgba8unorm", GpuTextureUsage::TEXTURE_BINDING | GpuTextureUsage::COPY_DST | GpuTextureUsage::RENDER_ATTACHMENT);
+                    let texture = self.device.create_texture(&tex_desc);
+                    
+                    let layout = GpuImageDataLayout::new(width * 4, height);
+                    let extent = GpuExtent3D::new(width, height);
+                    let dest = GpuImageCopyTexture::new(&texture);
+                    
+                    self.device.queue().write_texture_with_u8_array(&dest, data, &layout, &extent);
+                    /* log(&format!("    Char '{}' (idx: {}): glyph={}, advance={}", 
+         char_val as u8 as char, 
+         global_char_idx, 
+         glyph_idx, 
+         advance)); */
+                    if let Some(old) = &self.test_texture {
+                        let old_tex: &GpuTexture = old;
+                        old_tex.destroy();
+                    }
+                    self.test_texture = Some(texture);
+                    engine.image_dirty = false;
+                    rebind_needed = true;
+                    // log("Renderer: Image uploaded successfully.");
+                }
+            }
+        }
+        
+        if rebind_needed {
+            self.rebind_all();
         }
 
         let command_encoder = self.device.create_command_encoder(); 
@@ -463,7 +542,8 @@ impl FlexRenderer {
         
         if self.depth_texture.is_none() || self.depth_texture_width != canvas_width || self.depth_texture_height != canvas_height {
             if let Some(texture) = &self.depth_texture {
-                texture.destroy();
+                let t: &GpuTexture = texture;
+                t.destroy();
             }
             let depth_desc = js_sys::Object::new();
             let size = js_sys::Array::of2(&canvas_width.into(), &canvas_height.into());
@@ -549,7 +629,7 @@ impl FlexRenderer {
             // Reconstruct Character structs from bytes
             let char_size = std::mem::size_of::<crate::Character>();
             let count = vec.len() / char_size;
-            log(&format!("--- GPU DEBUG: Character Read-back (count: {}) ---", count));
+            // log(&format!("--- GPU DEBUG: Character Read-back (count: {}) ---", count));
             
             for i in 0..count {
                 let offset = i * char_size;
@@ -558,8 +638,10 @@ impl FlexRenderer {
                 let c = unsafe { &*char_ptr };
                 
                 if c.value != 0 {
-                    log(&format!("  Char[{}] val: '{}' (u32: {}), node: {}, x: {:.2}, y: {:.2}, w: {:.2}, h: {:.2}", 
-                        i, std::char::from_u32(c.value).unwrap_or('?'), c.value, c.node_index, c.x, c.y, c.width, c.height));
+                    // log(&format!("--- DEBUG: Node {} text: {:?} ---", gpu_idx, cpu_node.text));
+                    // log(&format!("  text_start: {}, text_length: {}", chars_start, chars_len));
+                    // log(&format!("  Char[{}] val: '{}' (u32: {}), node: {}, x: {:.2}, y: {:.2}, w: {:.2}, h: {:.2}", 
+                        // i, std::char::from_u32(c.value).unwrap_or('?'), c.value, c.node_index, c.x, c.y, c.width, c.height));
                 }
             }
             
@@ -584,14 +666,22 @@ impl FlexRenderer {
             self.bind_group_layout_compute.as_ref().unwrap(),
         )));
 
+
+        let entries = js_sys::Array::new();
+        entries.push(&GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())));
+        entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())));
+        
+        let tex_view: Object = self.test_texture.as_ref().unwrap().create_view().into();
+        entries.push(&GpuBindGroupEntry::new(5, &tex_view));
+        
+        let sampler: Object = self.sampler.as_ref().unwrap().clone().into();
+        entries.push(&GpuBindGroupEntry::new(6, &sampler));
+
         self.bind_group_render = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &js_sys::Array::of5(
-                &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())),
-            ),
+            &entries,
             self.bind_group_layout_render.as_ref().unwrap(),
         )));
     }

@@ -3,6 +3,7 @@ use crate::signals::{ReadSignal, create_effect};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use wasm_bindgen_futures::spawn_local;
 
 // --- Node Updater Logic ---
 
@@ -22,11 +23,13 @@ impl NodeUpdater {
 pub struct Element {
     min_width: f32,
     fixed_width: f32,
+    fixed_height: f32,
     color: Option<(f32, f32, f32, f32)>,
     text: Option<String>,
     flex_direction: Option<u32>,
     abs_pos: Option<(f32, f32)>,
     z_index: Option<f32>,
+    flags: u32,
 
     text_signal: Option<ReadSignal<String>>,
     flags_signal: Option<ReadSignal<u32>>,
@@ -39,11 +42,13 @@ impl Element {
         Self {
             min_width: 0.0,
             fixed_width: -1.0,
+            fixed_height: -1.0,
             color: None,
             text: None,
             flex_direction: None,
             abs_pos: None,
             z_index: None,
+            flags: 1, // Visible
             text_signal: None,
             flags_signal: None,
             children: Vec::new(),
@@ -51,7 +56,9 @@ impl Element {
     }
 
     pub fn width(mut self, w: f32) -> Self { self.fixed_width = w; self }
+    pub fn height(mut self, h: f32) -> Self { self.fixed_height = h; self }
     pub fn min_width(mut self, mw: f32) -> Self { self.min_width = mw; self }
+    pub fn flags(mut self, f: u32) -> Self { self.flags = f; self }
     pub fn color(mut self, r: f32, g: f32, b: f32, a: f32) -> Self { self.color = Some((r, g, b, a)); self }
     pub fn text(mut self, s: &str) -> Self { self.text = Some(s.to_string()); self }
     pub fn row(mut self) -> Self { self.flex_direction = Some(0); self }
@@ -73,6 +80,8 @@ impl Element {
         {
             let mut e = engine.borrow_mut();
             e.set_fixed_width(node_id, self.fixed_width);
+            e.set_fixed_height(node_id, self.fixed_height);
+            e.set_flags(node_id, self.flags);
             if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
             if let Some(s) = self.text { e.set_text(node_id, &s); }
             if let Some(dir) = self.flex_direction { e.set_flex_direction(node_id, dir); }
@@ -233,8 +242,19 @@ pub fn build_ui(engine: Rc<RefCell<FlexEngine>>) {
         .child(
             div().width(75.0).color(0.2, 0.2, 0.25, 1.0)
             .bind_text(sidebar_content)
+            .child(
+                 div().width(64.0).height(64.0).flags(3) // Visible (1) | Image (2) = 3
+            )
         )
         .build(engine.clone(), None);
+    
+    // Trigger Image Download
+    {
+        let engine_clone = engine.clone();
+        spawn_local(async move {
+            crate::load_image_to_engine(engine_clone, "test.png".to_string()).await;
+        });
+    }
 
     // --- Right Pane: Column Layout ---
     let right_pane = div().col().color(0.15, 0.15, 0.15, 1.0)

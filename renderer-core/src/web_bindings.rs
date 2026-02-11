@@ -1,9 +1,21 @@
 use wasm_bindgen::prelude::*;
-use js_sys::{Object, Reflect};
+use js_sys::{Object, Reflect, Promise};
 
 #[wasm_bindgen(inline_js = "export function get_window() { return window; }")]
 extern "C" {
     pub fn get_window() -> Option<Window>;
+}
+
+#[wasm_bindgen(inline_js = "
+export async function download_image(url) {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const arrayBuffer = await blob.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+}
+")]
+extern "C" {
+    pub fn download_image(url: &str) -> Promise;
 }
 
 #[wasm_bindgen]
@@ -12,6 +24,8 @@ extern "C" {
     pub type Window;
     #[wasm_bindgen(js_name = window)]
     pub fn window() -> Option<Window>;
+
+
 
     #[wasm_bindgen(method, getter, js_name = devicePixelRatio)]
     pub fn device_pixel_ratio(this: &Window) -> f64;
@@ -29,13 +43,13 @@ extern "C" {
     #[wasm_bindgen(method, getter)]
     pub fn height(this: &HtmlCanvasElement) -> u32;
 
-    // WebGPU Core
     #[wasm_bindgen(extends = Object)]
     #[derive(Clone)]
     pub type GpuDevice;
     #[wasm_bindgen(extends = Object)]
     #[derive(Clone)]
     pub type GpuQueue;
+
     #[wasm_bindgen(extends = Object)]
     #[derive(Clone)]
     pub type GpuBuffer;
@@ -45,6 +59,9 @@ extern "C" {
     #[wasm_bindgen(extends = Object)]
     #[derive(Clone)]
     pub type GpuTextureView;
+    #[wasm_bindgen(extends = Object)]
+    #[derive(Clone)]
+    pub type GpuExternalTexture;
     #[wasm_bindgen(extends = Object)]
     #[derive(Clone)]
     pub type GpuSampler;
@@ -119,6 +136,9 @@ extern "C" {
     // GpuQueue methods
     #[wasm_bindgen(method, js_name = writeBuffer)]
     pub fn write_buffer_with_f64_and_u8_array(this: &GpuQueue, buffer: &GpuBuffer, buffer_offset: f64, data: &[u8]);
+
+    #[wasm_bindgen(method, js_name = writeTexture)]
+    pub fn write_texture_with_u8_array(this: &GpuQueue, destination: &Object, data: &[u8], data_layout: &Object, size: &Object);
 
     #[wasm_bindgen(method)]
     pub fn submit(this: &GpuQueue, command_buffers: &js_sys::Array);
@@ -245,6 +265,28 @@ impl GpuBindGroupLayoutEntry {
         let obj = Object::new();
         Reflect::set(&obj, &"binding".into(), &binding.into()).unwrap();
         Reflect::set(&obj, &"visibility".into(), &visibility.into()).unwrap();
+        obj
+    }
+
+    pub fn new_texture(binding: u32, visibility: u32) -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"binding".into(), &binding.into()).unwrap();
+        Reflect::set(&obj, &"visibility".into(), &visibility.into()).unwrap();
+        
+        let texture = Object::new();
+        // viewDimension defaults to "2d", sampleType defaults to "float"
+        Reflect::set(&obj, &"texture".into(), &texture).unwrap();
+        obj
+    }
+
+    pub fn new_sampler(binding: u32, visibility: u32) -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"binding".into(), &binding.into()).unwrap();
+        Reflect::set(&obj, &"visibility".into(), &visibility.into()).unwrap();
+
+        let sampler = Object::new();
+        Reflect::set(&sampler, &"type".into(), &"filtering".into()).unwrap();
+        Reflect::set(&obj, &"sampler".into(), &sampler).unwrap();
         obj
     }
 }
@@ -408,3 +450,59 @@ impl GpuBufferBindingType {
         }
     }
 }
+
+pub struct GpuImageCopyTexture;
+impl GpuImageCopyTexture {
+    pub fn new(texture: &GpuTexture) -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"texture".into(), texture).unwrap();
+        obj
+    }
+}
+
+pub struct GpuImageDataLayout;
+impl GpuImageDataLayout {
+    pub fn new(bytes_per_row: u32, rows_per_image: u32) -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"bytesPerRow".into(), &bytes_per_row.into()).unwrap();
+        Reflect::set(&obj, &"rowsPerImage".into(), &rows_per_image.into()).unwrap();
+        obj
+    }
+}
+
+pub struct GpuExtent3D;
+impl GpuExtent3D {
+    pub fn new(width: u32, height: u32) -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"width".into(), &width.into()).unwrap();
+        Reflect::set(&obj, &"height".into(), &height.into()).unwrap();
+        Reflect::set(&obj, &"depthOrArrayLayers".into(), &1u32.into()).unwrap();
+        obj
+    }
+}
+
+pub struct GpuSamplerBindingType;
+impl GpuSamplerBindingType {
+    pub const Filtering: &'static str = "filtering";
+}
+
+pub struct GpuTextureSampleType;
+impl GpuTextureSampleType {
+    pub const Float: &'static str = "float";
+}
+
+pub struct GpuTextureViewDimension;
+impl GpuTextureViewDimension {
+    pub const D2: &'static str = "2d";
+}
+
+pub struct GpuSamplerDescriptor;
+impl GpuSamplerDescriptor {
+    pub fn new() -> Object {
+        let obj = Object::new();
+        Reflect::set(&obj, &"magFilter".into(), &"linear".into()).unwrap();
+        Reflect::set(&obj, &"minFilter".into(), &"linear".into()).unwrap();
+        obj
+    }
+}
+

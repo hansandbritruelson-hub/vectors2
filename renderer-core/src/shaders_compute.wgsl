@@ -1,6 +1,7 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
     min_width: f32,
+    fixed_height: f32, // -1.0 = auto
     final_width: f32,
     
     desired_height: f32,
@@ -30,7 +31,7 @@ struct Node {
     
     // --- Padding to 128 bytes ---
     _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
-    _pad4: u32, _pad5: u32, _pad6: u32, _pad7: u32,
+    _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
 };
 
 struct Character {
@@ -290,6 +291,11 @@ fn process_node_height(id: u32) {
     // Visibility Check
     if ((nodes[id].flags & 1u) == 0u) {
         nodes[id].desired_height = 0.0;
+        return;
+    }
+
+    if (nodes[id].fixed_height >= 0.0) {
+        nodes[id].desired_height = nodes[id].fixed_height;
         return;
     }
 
