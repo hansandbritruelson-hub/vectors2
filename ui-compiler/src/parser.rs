@@ -35,11 +35,16 @@ pub struct Template {
     pub script: Option<String>,
 }
 
-fn identifier(input: &str) -> IResult<&str, &str> {
-    recognize(pair(
-        take_while1(|c: char| c.is_alphanumeric() || c == ':' || c == '_' || c == '@' || c == '#'),
-        take_while(|c: char| c.is_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '.' || c == '@' || c == '#'),
-    ))(input)
+fn identifier(input: &str) -> IResult<&str, String> {
+    map(
+        recognize(pair(
+            // First character can be alphanumeric, or one of ':', '@', '#', '_'
+            take_while1(|c: char| c.is_alphanumeric() || c == ':' || c == '@' || c == '#'),
+            // Subsequent characters can be alphanumeric, or one of '-', '_', ':', '.', '@', '#'
+            take_while(|c: char| c.is_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '.' || c == '@' || c == '#'),
+        )),
+        |s: &str| s.to_string(),
+    )(input)
 }
 
 fn attribute(input: &str) -> IResult<&str, Attribute> {
@@ -49,12 +54,8 @@ fn attribute(input: &str) -> IResult<&str, Attribute> {
         delimited(tag("\""), take_until("\""), tag("\"")),
     )))(input)?;
 
-    let is_dynamic = name.starts_with(':') || name.starts_with("v-");
-    let clean_name = if name.starts_with(':') {
-        &name[1..]
-    } else {
-        name
-    };
+    let is_dynamic = name.starts_with(':') || name.starts_with('@');
+    let clean_name = &name;
 
     let value = value_opt.map(|(_, v)| v.to_string()).unwrap_or_else(|| "true".to_string());
 

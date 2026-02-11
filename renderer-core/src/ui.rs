@@ -35,6 +35,7 @@ pub struct Element {
     text_signal: Option<ReadSignal<String>>,
     flags_signal: Option<ReadSignal<u32>>,
     
+    on_click: Option<Rc<dyn Fn()>>,
     children: Vec<Element>,
 }
 
@@ -53,6 +54,7 @@ impl Element {
             flags: 1, // Visible
             text_signal: None,
             flags_signal: None,
+            on_click: None,
             children: Vec::new(),
         }
     }
@@ -69,6 +71,7 @@ impl Element {
     pub fn absolute(mut self, top: f32, left: f32) -> Self { self.abs_pos = Some((top, left)); self }
     pub fn z(mut self, z: f32) -> Self { self.z_index = Some(z); self }
     pub fn child(mut self, child: Element) -> Self { self.children.push(child); self }
+    pub fn on_click<F: Fn() + 'static>(mut self, f: F) -> Self { self.on_click = Some(Rc::new(f)); self }
 
     pub fn bind_text(mut self, signal: ReadSignal<String>) -> Self { self.text_signal = Some(signal); self }
     pub fn bind_flags(mut self, signal: ReadSignal<u32>) -> Self { self.flags_signal = Some(signal); self }
@@ -86,12 +89,12 @@ impl Element {
             e.set_fixed_height(node_id, self.fixed_height);
             e.set_flags(node_id, self.flags);
             if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
-            if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
             if let Some(s) = self.text { e.set_text(node_id, &s); }
             if let Some(id) = self.image_id { e.set_image_asset_id(node_id, &id); }
             if let Some(dir) = self.flex_direction { e.set_flex_direction(node_id, dir); }
             if let Some((t, l)) = self.abs_pos { e.set_position_absolute(node_id, t, l); }
             if let Some(z) = self.z_index { e.set_z_index(node_id, z); }
+            if let Some(f) = self.on_click { e.set_on_click(node_id, f); }
             
             if let Some(p) = parent {
                 if let Some(a) = after {

@@ -262,7 +262,7 @@ pub struct GpuNode {
     pub uv_max_y: f32,
     
     // --- Padding to 128 bytes ---
-    pub _pad4: u32, pub _pad5: u32, pub _pad6: u32, // Removed pad7 due to fixed_height
+    pub cpu_index: u32, pub _pad5: u32, pub _pad6: u32, // Removed pad7 due to fixed_height
 }
 
 #[test]
@@ -299,13 +299,13 @@ impl GpuNode {
             flags: 1, // Default to 1 (Visible)
             natural_content_width: 0.0,
             uv_min_x: 0.0, uv_min_y: 0.0, uv_max_x: 0.0, uv_max_y: 0.0,
-            _pad4: 0, _pad5: 0, _pad6: 0,
+            cpu_index: 0, _pad5: 0, _pad6: 0,
         }
     }
 }
 
 // --- The Logical CPU Node (DOM) ---
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CpuNode {
     // Topology (Linked List)
     pub parent: Option<usize>,
@@ -334,6 +334,9 @@ pub struct CpuNode {
     pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
+    
+    // Events
+    pub on_click: Option<std::rc::Rc<dyn Fn()>>,
 }
 
 impl CpuNode {
@@ -358,6 +361,7 @@ impl CpuNode {
             text: None,
             image_asset_id: None,
             cached_texture: None,
+            on_click: None,
         }
     }
 }
@@ -395,16 +399,23 @@ impl Character {
 
 #[wasm_bindgen]
 pub struct FlexEngine {
-    cpu_nodes: Vec<CpuNode>, // The Logical DOM (Linked List)
-    gpu_nodes: Vec<GpuNode>, // The Render Tree (Flattened)
+    #[wasm_bindgen(skip)]
+    pub(crate) cpu_nodes: Vec<CpuNode>, // The Logical DOM (Linked List)
+    #[wasm_bindgen(skip)]
+    pub(crate) gpu_nodes: Vec<GpuNode>, // The Render Tree (Flattened)
     
-    characters: Vec<Character>,
-    glyph_data: Vec<GlyphData>,
-    kerning_table: Vec<KerningRecord>,
+    #[wasm_bindgen(skip)]
+    pub characters: Vec<Character>,
+    #[wasm_bindgen(skip)]
+    pub glyph_data: Vec<GlyphData>,
+    #[wasm_bindgen(skip)]
+    pub kerning_table: Vec<KerningRecord>,
     
     // New GPU Vector Graphics Data
-    curves: Vec<GpuCurve>,
-    glyph_infos: Vec<GpuGlyphInfo>,
+    #[wasm_bindgen(skip)]
+    pub curves: Vec<GpuCurve>,
+    #[wasm_bindgen(skip)]
+    pub glyph_infos: Vec<GpuGlyphInfo>,
 
     // Font Metrics
     pub ascender: f32,
@@ -517,6 +528,63 @@ impl FlexEngine {
         self.cpu_nodes.push(node);
         self.mark_dirty();
         index
+    }
+
+    pub fn handle_click(&mut self, x: f32, y: f32) {
+        log(&format!("FlexEngine: Handling click at {}, {}", x, y));
+        
+        let mut hit_idx = None;
+        for i in (0..self.gpu_nodes.len()).rev() {
+            let n = &self.gpu_nodes[i];
+            
+            // Skip invisible if flag bit 0 is Not set
+            if (n.flags & 1) == 0 { continue; }
+
+            let left = n.final_x;
+            let top = n.final_y;
+            let right = left + n.final_width;
+            let bottom = top + n.final_height;
+
+            if x >= left && x <= right && y >= top && y <= bottom {
+                log(&format!("FlexEngine: HIT Node {} (CPU Idx: {}) at [{}, {}, {}, {}]", i, n.cpu_index, left, top, right, bottom));
+                hit_idx = Some(i);
+                break;
+            }
+        }
+
+        if let Some(gpu_idx) = hit_idx {
+            let initial_cpu_idx = self.gpu_nodes[gpu_idx].cpu_index as usize;
+            
+            // Log target node info
+            if let Some(node) = self.cpu_nodes.get(initial_cpu_idx) {
+                let text_label = node.text.as_deref().unwrap_or("None");
+                log(&format!("FlexEngine: Target Node {} (CPU Idx: {}), Text: {:?}", gpu_idx, initial_cpu_idx, text_label));
+            }
+
+            // Event Bubbling
+            let mut current_cpu_idx = Some(initial_cpu_idx);
+            let mut handled = false;
+
+            while let Some(cpu_idx) = current_cpu_idx {
+                if let Some(node) = self.cpu_nodes.get(cpu_idx) {
+                    if let Some(cb) = &node.on_click {
+                        log(&format!("FlexEngine: Executing on_click callback at CPU Node {}", cpu_idx));
+                        cb();
+                        handled = true;
+                        break;
+                    }
+                    current_cpu_idx = node.parent;
+                } else {
+                    break;
+                }
+            }
+
+            if !handled {
+                log("FlexEngine: HIT but NO callback found in parent chain");
+            }
+        } else {
+            log("FlexEngine: NO node hit at these coordinates");
+        }
     }
 
     // --- Topology Management (Linked List Wiring) ---
@@ -858,6 +926,7 @@ impl FlexEngine {
                 gpu_node.position_mode = cpu_node.position_mode;
                 gpu_node.flex_direction = cpu_node.flex_direction;
                 gpu_node.flags = cpu_node.flags; // Visibility
+                gpu_node.cpu_index = cpu_idx as u32;
                 
                 // Topology
                 gpu_node.child_start_index = start_child_gpu_idx;
@@ -1114,6 +1183,14 @@ impl FlexEngine {
     
     pub fn mark_clean(&mut self) {
         self.dirty = false;
+    }
+}
+
+impl FlexEngine {
+    pub fn set_on_click(&mut self, node_id: u32, f: std::rc::Rc<dyn Fn()>) {
+        if let Some(node) = self.cpu_nodes.get_mut(node_id as usize) {
+            node.on_click = Some(f);
+        }
     }
 }
 

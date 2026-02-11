@@ -15,7 +15,7 @@ pub fn generate_rust(template: &Template) -> String {
     let expanded = quote! {
         use crate::FlexEngine;
         use crate::ui::{div, text, mount_list, Element};
-        use crate::signals::{ReadSignal, create_effect, create_signal};
+        use crate::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString};
         use std::rc::Rc;
         use std::cell::RefCell;
 
@@ -56,7 +56,10 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
                 quote! { None }
             };
             quote! {
-                div().child(text(&#expr)).build(engine.clone(), #parent_token);
+                div().child(text("").bind_text(create_memo({
+                    let val = #expr.clone();
+                    move || val.to_reactive_string()
+                }))).build(engine.clone(), #parent_token);
             }
         }
     }
@@ -99,15 +102,24 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
             "row" => { builder = quote! { #builder.row() }; }
             "col" => { builder = quote! { #builder.col() }; }
             _ => {
-                 if attr.is_dynamic {
+                 if attr.name == "@click" {
+                     let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+                     builder = quote! { #builder.on_click(move || { #expr }) };
+                 } else if attr.name == "text" || attr.name == ":text" {
+                     if attr.is_dynamic || attr.name == ":text" {
+                         let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+                         // Use create_memo to ensure it's a ReadSignal<String>
+                         builder = quote! { #builder.bind_text(create_memo({
+                             let val = #expr.clone();
+                             move || val.to_reactive_string()
+                         })) };
+                     } else {
+                         let val = &attr.value;
+                         builder = quote! { #builder.text(#val) };
+                     }
+                 } else if attr.is_dynamic {
                      let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                     if attr.name == "text" {
-                         if let syn::Expr::Path(_) = expr {
-                             builder = quote! { #builder.bind_text(#expr) };
-                         } else {
-                             builder = quote! { #builder.text(&#expr) };
-                         }
-                     } else if attr.name == "flags" {
+                     if attr.name == "flags" {
                          builder = quote! { #builder.bind_flags(#expr) };
                      }
                  }
@@ -126,7 +138,10 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
             }
             Node::Binding(b) => {
                 let expr: syn::Expr = syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                builder = quote! { #builder.child(text(&#expr)) };
+                builder = quote! { #builder.child(text("").bind_text(create_memo({
+                    let val = #expr.clone();
+                    move || val.to_reactive_string()
+                }))) };
             }
         }
     }
@@ -207,15 +222,23 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 "row" => { builder = quote! { #builder.row() }; }
                 "col" => { builder = quote! { #builder.col() }; }
                 _ => {
-                     if attr.is_dynamic {
+                     if attr.name == "@click" {
+                         let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+                         builder = quote! { #builder.on_click(move || { #expr }) };
+                     } else if attr.name == "text" || attr.name == ":text" {
+                         if attr.is_dynamic || attr.name == ":text" {
+                             let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+                             builder = quote! { #builder.bind_text(create_memo({
+                                 let val = #expr.clone();
+                                 move || val.to_reactive_string()
+                             })) };
+                         } else {
+                             let val = &attr.value;
+                             builder = quote! { #builder.text(#val) };
+                         }
+                     } else if attr.is_dynamic {
                          let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                         if attr.name == "text" {
-                             if let syn::Expr::Path(_) = expr {
-                                 builder = quote! { #builder.bind_text(#expr) };
-                             } else {
-                                 builder = quote! { #builder.text(&#expr) };
-                             }
-                         } else if attr.name == "flags" {
+                         if attr.name == "flags" {
                              builder = quote! { #builder.bind_flags(#expr) };
                          }
                      }

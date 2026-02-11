@@ -1,8 +1,10 @@
 <template>
-  <div class="root" row color="0.1, 0.1, 0.1, 1.0">
-    <div class="sidebar" col width="75.0" color="0.2, 0.2, 0.25, 1.0" :text="sidebar_content">
-      <div width="64.0" height="64.0" image="paintbrush.svg"></div>
-      <div width="64.0" height="64.0" image="paintbrush.svg"></div>
+  <div class="main" row color="0.1, 0.1, 0.1, 1.0">
+    <div class="sidebar" col width="75" color="0.2, 0.2, 0.25, 1.0" @click="set_count.set(count.get() + 1)">
+      <div color="1,0,1,1">Count: {{ count }}</div>
+      <div :text="sidebar_content"></div>
+      <div width="64" height="64" image="paintbrush.svg"></div>
+      <div width="64" height="64" image="paintbrush.svg"></div>
     </div>
     
     <div class="right-pane" col color="0.15, 0.15, 0.15, 1.0">
@@ -28,6 +30,7 @@
 
 <script>
     let (sidebar_content, set_sidebar_content) = crate::signals::create_signal("SIDEBAR\n(Reactive)".to_string());
+    let (count, set_count) = crate::signals::create_signal(0);
     
     #[derive(Clone)]
     struct User { id: String, name: String }

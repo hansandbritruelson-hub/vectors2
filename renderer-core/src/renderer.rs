@@ -137,7 +137,7 @@ impl FlexRenderer {
         if char_count > 0 {
              let char_data = engine.get_characters_buffer();
              let char_vec = char_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_u8_array(&chars_buf, 0.0, &char_vec);
+             self.device.queue().write_buffer_with_f64_and_js_value(&chars_buf, 0.0, &js_sys::Uint8Array::from(char_vec.as_slice()).into());
         }
         self.characters_buffer = Some(chars_buf);
 
@@ -154,7 +154,7 @@ impl FlexRenderer {
         if glyph_count > 0 {
             let glyph_data = engine.get_glyph_data_buffer();
             let glyph_vec = glyph_data.to_vec();
-            self.device.queue().write_buffer_with_f64_and_u8_array(&glyph_buf, 0.0, &glyph_vec);
+            self.device.queue().write_buffer_with_f64_and_js_value(&glyph_buf, 0.0, &js_sys::Uint8Array::from(glyph_vec.as_slice()).into());
         }
         self.glyph_buffer = Some(glyph_buf);
         
@@ -171,7 +171,7 @@ impl FlexRenderer {
         ));
         if curve_data.byte_length() > 0 {
              let curve_vec = curve_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_u8_array(&curve_buf, 0.0, &curve_vec);
+             self.device.queue().write_buffer_with_f64_and_js_value(&curve_buf, 0.0, &js_sys::Uint8Array::from(curve_vec.as_slice()).into());
         }
         self.curve_buffer = Some(curve_buf);
 
@@ -183,7 +183,7 @@ impl FlexRenderer {
         ));
         if glyph_info_data.byte_length() > 0 {
              let info_vec = glyph_info_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_u8_array(&info_buf, 0.0, &info_vec);
+             self.device.queue().write_buffer_with_f64_and_js_value(&info_buf, 0.0, &js_sys::Uint8Array::from(info_vec.as_slice()).into());
         }
         self.glyph_info_buffer = Some(info_buf);
 
@@ -368,10 +368,10 @@ impl FlexRenderer {
             }
         };
 
-        self.device.queue().write_buffer_with_f64_and_u8_array(
+        self.device.queue().write_buffer_with_f64_and_js_value(
             self.uniform_buffer.as_ref().unwrap(), 
             0.0, 
-            &uniform_bytes
+            &js_sys::Uint8Array::from(uniform_bytes.as_slice()).into()
         );
 
         let node_count: u32;
@@ -400,10 +400,10 @@ impl FlexRenderer {
 
         // Write Node data
         let nodes_vec = self.engine.borrow().get_nodes_buffer().to_vec();
-        self.device.queue().write_buffer_with_f64_and_u8_array(
+        self.device.queue().write_buffer_with_f64_and_js_value(
             self.nodes_buffer.as_ref().unwrap(),
             0.0,
-            &nodes_vec
+            &js_sys::Uint8Array::from(nodes_vec.as_slice()).into()
         );
 
         // Update Characters
@@ -419,7 +419,7 @@ impl FlexRenderer {
                       (if chars_byte_length == 0 { 4 } else { chars_byte_length }) as f64,
                       0x0080 | 0x0008 | 0x0004
                  ));
-                 self.device.queue().write_buffer_with_f64_and_u8_array(&new_buf, 0.0, &chars_vec);
+                 self.device.queue().write_buffer_with_f64_and_js_value(&new_buf, 0.0, &js_sys::Uint8Array::from(chars_vec.as_slice()).into());
                  self.characters_buffer = Some(new_buf);
                  drop(engine);
                  self.rebind_all();
@@ -681,6 +681,59 @@ impl FlexRenderer {
             }
             
             Ok(wasm_bindgen::JsValue::UNDEFINED)
+        })
+    }
+
+    pub fn handle_click(&self, x: f32, y: f32) -> Promise {
+        let device = self.device.clone();
+        let nodes_buffer = self.nodes_buffer.as_ref().expect("nodes_buffer not initialized").clone();
+        let engine = self.engine.clone();
+        
+        wasm_bindgen_futures::future_to_promise(async move {
+            let size_val = Reflect::get(&nodes_buffer, &"size".into()).expect("size property missing").as_f64().unwrap_or(0.0);
+            if size_val <= 0.0 {
+                 return Ok(JsValue::UNDEFINED);
+            }
+
+            let staging_buf = device.create_buffer(&GpuBufferDescriptor::new(size_val, 0x0001 | 0x0008));
+            
+            let encoder = device.create_command_encoder();
+            encoder.copy_buffer_to_buffer(&nodes_buffer, 0.0, &staging_buf, 0.0, size_val);
+            device.queue().submit(&js_sys::Array::of1(&encoder.finish()));
+
+            let promise = staging_buf.map_async(0x0001); // MAP_READ
+            wasm_bindgen_futures::JsFuture::from(promise).await.map_err(|_| JsValue::from_str("Failed to map buffer"))?;
+            
+            let array_buffer = staging_buf.get_mapped_range();
+            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+            let vec = uint8_array.to_vec();
+            staging_buf.unmap();
+            staging_buf.destroy(); // Keep this line as it was in the original
+            log(&format!("FlexRenderer: Read back {} bytes from nodes_buffer", vec.len()));
+        
+            let node_size = std::mem::size_of::<crate::GpuNode>();
+            let count = vec.len() / node_size;
+            log(&format!("FlexRenderer: Decoding {} nodes (node_size: {})", count, node_size));
+
+            let mut gpu_nodes = Vec::with_capacity(count);
+            for i in 0..count {
+                let offset = i * node_size;
+                let node_ptr = unsafe { vec.as_ptr().add(offset) } as *const crate::GpuNode;
+                let node = unsafe { (*node_ptr).clone() };
+                if i < 5 || (node.flags & 1) != 0 {
+                    // Log the first few or any visible nodes
+                    log(&format!("FlexRenderer: Node {} [flags: {}, pos: {}, {} size: {}x{}]", i, node.flags, node.final_x, node.final_y, node.final_width, node.final_height));
+                }
+                gpu_nodes.push(node);
+            }
+            
+            {
+                let mut e = engine.borrow_mut();
+                e.gpu_nodes = gpu_nodes;
+                e.handle_click(x, y);
+            }
+            
+            Ok(JsValue::UNDEFINED)
         })
     }
 

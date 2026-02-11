@@ -74,6 +74,13 @@ where
 
     run_effect(id);
 }
+pub fn create_memo<T: 'static + Clone, F: Fn() -> T + 'static>(f: F) -> ReadSignal<T> {
+    let (read, write) = create_signal(f());
+    create_effect(move || {
+        write.set(f());
+    });
+    read
+}
 
 // --- Signal Accessors ---
 
@@ -179,4 +186,30 @@ fn run_effect(id: EffectId) {
             rt.effects.insert(id, f);
         });
     }
+}
+
+// --- Conversion Trait ---
+
+pub trait ToReactiveString {
+    fn to_reactive_string(&self) -> String;
+}
+
+impl<T: std::fmt::Display + Clone + 'static> ToReactiveString for ReadSignal<T> {
+    fn to_reactive_string(&self) -> String { self.get().to_string() }
+}
+
+impl ToReactiveString for String {
+    fn to_reactive_string(&self) -> String { self.clone() }
+}
+
+impl ToReactiveString for &str {
+    fn to_reactive_string(&self) -> String { self.to_string() }
+}
+
+impl ToReactiveString for i32 {
+    fn to_reactive_string(&self) -> String { self.to_string() }
+}
+
+impl ToReactiveString for f32 {
+    fn to_reactive_string(&self) -> String { self.to_string() }
 }
