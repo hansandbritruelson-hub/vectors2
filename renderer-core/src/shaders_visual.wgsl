@@ -1,7 +1,6 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
-    style_basis: f32,
-    desired_width: f32,
+    min_width: f32,
     final_width: f32,
     
     desired_height: f32,
@@ -27,7 +26,7 @@ struct Node {
     text_start: u32,
     text_length: u32,
     flags: u32, // Bit 0 = Visible
-    _pad1: u32,
+    unconstrained_content_width: f32,
 };
 
 struct Character {

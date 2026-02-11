@@ -203,13 +203,10 @@ pub struct KerningRecord {
 pub struct GpuNode {
     // --- Layout Inputs ---
     pub fixed_width: f32,   // -1.0 = auto
-    pub style_basis: f32,
+    pub min_width: f32,
     
-    // --- Computed Values (Phase A - Width) ---
-    pub desired_width: f32,
+    // --- Computed Values ---
     pub final_width: f32,
-
-    // --- Computed Values (Phase B - Height/Pos) ---
     pub desired_height: f32,
     pub final_height: f32,
     pub final_x: f32,
@@ -238,15 +235,14 @@ pub struct GpuNode {
     pub text_start: u32,
     pub text_length: u32,
     pub flags: u32,       // Bit 0 = Visible
-    pub _pad1: u32,
+    pub unconstrained_content_width: f32,
 }
 
 impl GpuNode {
     pub fn new() -> Self {
         Self {
             fixed_width: -1.0,
-            style_basis: 0.0,
-            desired_width: 0.0,
+            min_width: 0.0,
             final_width: 0.0,
             desired_height: 0.0,
             final_height: 0.0,
@@ -268,7 +264,7 @@ impl GpuNode {
             text_start: 0,
             text_length: 0,
             flags: 1, // Default to 1 (Visible)
-            _pad1: 0,
+            unconstrained_content_width: 0.0,
         }
     }
 }
@@ -284,11 +280,11 @@ pub struct CpuNode {
 
     // Properties (Mirrored from GpuNode Inputs)
     pub fixed_width: f32,
-    pub style_basis: f32,
+    pub min_width: f32,
     pub color: (f32, f32, f32, f32),
     pub top_offset: f32,
     pub left_offset: f32,
-    pub z_index: f32,
+    pub z_index: Option<f32>,
     pub position_mode: u32,
     pub flex_direction: u32,
     pub flags: u32,
@@ -306,11 +302,11 @@ impl CpuNode {
             last_child: None,
             
             fixed_width: -1.0,
-            style_basis: 0.0,
+            min_width: 0.0,
             color: (0.0, 0.0, 0.0, 0.0),
             top_offset: 0.0,
             left_offset: 0.0,
-            z_index: 0.0,
+            z_index: None,
             position_mode: 0,
             flex_direction: 0, // Row
             flags: 1,
@@ -351,7 +347,6 @@ impl Character {
     }
 }
 
-#[wasm_bindgen]
 #[wasm_bindgen]
 pub struct FlexEngine {
     cpu_nodes: Vec<CpuNode>, // The Logical DOM (Linked List)
@@ -452,9 +447,9 @@ impl FlexEngine {
         self.face = Some(face);
     }
 
-    pub fn add_node(&mut self, style_basis: f32) -> u32 {
+    pub fn add_node(&mut self, min_width: f32) -> u32 {
         let mut node = CpuNode::new();
-        node.style_basis = style_basis;
+        node.min_width = min_width;
         let index = self.cpu_nodes.len() as u32;
         self.cpu_nodes.push(node);
         self.mark_dirty();
@@ -472,8 +467,8 @@ impl FlexEngine {
             return;
         }
         
-        // 1. Unlink from old parent (if any) - Skipped for V1 (assuming add-only for now)
-        // Note: For full DOM, we need 'remove_from_parent' here.
+        // 1. Unlink from old parent (if any)
+        self.remove_from_parent(child_id);
 
         // 2. Link to new parent
         self.cpu_nodes[child_idx].parent = Some(parent_idx);
@@ -489,6 +484,98 @@ impl FlexEngine {
             self.cpu_nodes[parent_idx].last_child = Some(child_idx);
         }
         
+        self.mark_dirty();
+    }
+
+    pub fn insert_after_node(&mut self, child_id: u32, parent_id: u32, after_id: Option<u32>) {
+        let child_idx = child_id as usize;
+        let parent_idx = parent_id as usize;
+        
+        if child_idx >= self.cpu_nodes.len() || parent_idx >= self.cpu_nodes.len() {
+            log("Invalid node index in insert_after_node");
+            return;
+        }
+
+        // Unlink
+        self.remove_from_parent(child_id);
+
+        self.cpu_nodes[child_idx].parent = Some(parent_idx);
+
+        if let Some(after_idx) = after_id.map(|id| id as usize) {
+            // Insert after specific node
+            let next = self.cpu_nodes[after_idx].next_sibling;
+            self.cpu_nodes[after_idx].next_sibling = Some(child_idx);
+            self.cpu_nodes[child_idx].next_sibling = next;
+
+            if next.is_none() {
+                // Was last, update parent's last_child
+                self.cpu_nodes[parent_idx].last_child = Some(child_idx);
+            }
+        } else {
+            // Insert at the very beginning
+            let next = self.cpu_nodes[parent_idx].first_child;
+            self.cpu_nodes[parent_idx].first_child = Some(child_idx);
+            self.cpu_nodes[child_idx].next_sibling = next;
+
+            if next.is_none() {
+                self.cpu_nodes[parent_idx].last_child = Some(child_idx);
+            }
+        }
+
+        self.mark_dirty();
+    }
+
+    pub fn remove_from_parent(&mut self, node_id: u32) {
+        let node_idx = node_id as usize;
+        if node_idx >= self.cpu_nodes.len() { return; }
+
+        let parent_idx = match self.cpu_nodes[node_idx].parent {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Find prev sibling
+        let mut prev_sibling = None;
+        let mut curr = self.cpu_nodes[parent_idx].first_child;
+        while let Some(curr_idx) = curr {
+            if curr_idx == node_idx { break; }
+            prev_sibling = Some(curr_idx);
+            curr = self.cpu_nodes[curr_idx].next_sibling;
+        }
+
+        let next_sibling = self.cpu_nodes[node_idx].next_sibling;
+
+        if let Some(prev) = prev_sibling {
+            self.cpu_nodes[prev].next_sibling = next_sibling;
+        } else {
+            // It was the first child
+            self.cpu_nodes[parent_idx].first_child = next_sibling;
+        }
+
+        if next_sibling.is_none() {
+            // It was the last child
+            self.cpu_nodes[parent_idx].last_child = prev_sibling;
+        }
+
+        self.cpu_nodes[node_idx].parent = None;
+        self.cpu_nodes[node_idx].next_sibling = None;
+        self.mark_dirty();
+    }
+
+    pub fn clear_children(&mut self, parent_id: u32) {
+        let parent_idx = parent_id as usize;
+        if parent_idx >= self.cpu_nodes.len() { return; }
+
+        let mut curr = self.cpu_nodes[parent_idx].first_child;
+        while let Some(child_idx) = curr {
+            let next = self.cpu_nodes[child_idx].next_sibling;
+            self.cpu_nodes[child_idx].parent = None;
+            self.cpu_nodes[child_idx].next_sibling = None;
+            curr = next;
+        }
+
+        self.cpu_nodes[parent_idx].first_child = None;
+        self.cpu_nodes[parent_idx].last_child = None;
         self.mark_dirty();
     }
     
@@ -602,18 +689,26 @@ impl FlexEngine {
             }
             
             // Now update the Parent Node with child info
+            let mut parent_z = 0.0;
+            let mut parent_gpu_idx = 0;
+            if let Some(p_cpu) = cpu_node.parent {
+                if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
+                     parent_gpu_idx = p_gpu;
+                     parent_z = self.gpu_nodes[p_gpu as usize].z_index;
+                }
+            }
+
             {
                 let gpu_node = &mut self.gpu_nodes[gpu_idx as usize];
                 // Mirror Props
                 gpu_node.fixed_width = cpu_node.fixed_width;
-                gpu_node.style_basis = cpu_node.style_basis;
+                gpu_node.min_width = cpu_node.min_width;
                 gpu_node.color_r = cpu_node.color.0;
                 gpu_node.color_g = cpu_node.color.1;
                 gpu_node.color_b = cpu_node.color.2;
                 gpu_node.color_a = cpu_node.color.3;
                 gpu_node.top_offset = cpu_node.top_offset;
                 gpu_node.left_offset = cpu_node.left_offset;
-                gpu_node.z_index = cpu_node.z_index;
                 gpu_node.position_mode = cpu_node.position_mode;
                 gpu_node.flex_direction = cpu_node.flex_direction;
                 gpu_node.flags = cpu_node.flags; // Visibility
@@ -622,15 +717,10 @@ impl FlexEngine {
                 gpu_node.child_start_index = start_child_gpu_idx;
                 gpu_node.child_count = child_count;
                 
-                // Parent Ref (Look up from cpu_node.parent)
-                if let Some(p_cpu) = cpu_node.parent {
-                    if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
-                         gpu_node.parent_index = p_gpu;
-                    }
-                } else {
-                     // Root points to self
-                     gpu_node.parent_index = 0;
-                }
+                // Parent Ref
+                gpu_node.parent_index = if cpu_node.parent.is_some() { parent_gpu_idx } else { 0 };
+
+                gpu_node.z_index = cpu_node.z_index.unwrap_or(parent_z);
                 
                 // Text Handling (Rebuild Characters)
                 if let Some(text) = &cpu_node.text {
@@ -694,7 +784,7 @@ impl FlexEngine {
 
     pub fn set_z_index(&mut self, node_index: u32, z_index: f32) {
         if (node_index as usize) < self.cpu_nodes.len() {
-            self.cpu_nodes[node_index as usize].z_index = z_index;
+            self.cpu_nodes[node_index as usize].z_index = Some(z_index);
             self.mark_dirty();
         }
     }
@@ -714,10 +804,9 @@ impl FlexEngine {
         self.gpu_nodes.as_ptr()
     }
 
-    pub fn get_node_count(&mut self) -> usize {
+    pub fn get_node_count(&self) -> usize {
         // Return GPU node count so the renderer allocates enough buffer
-        // This implies flatten() must be called BEFORE this.
-        self.render(); // Ensure fresh
+        // This implies render() must be called BEFORE this.
         self.gpu_nodes.len()
     }
     

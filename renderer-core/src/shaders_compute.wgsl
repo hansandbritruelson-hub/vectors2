@@ -1,7 +1,6 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
-    style_basis: f32,
-    desired_width: f32,
+    min_width: f32,
     final_width: f32,
     
     desired_height: f32,
@@ -27,7 +26,7 @@ struct Node {
     text_start: u32,
     text_length: u32,
     flags: u32, // Bit 0 = Visible
-    _pad1: u32,
+    unconstrained_content_width: f32,
 };
 
 struct Character {
@@ -156,44 +155,46 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
+fn get_negotiated_width(id: u32) -> f32 {
+    if (nodes[id].fixed_width >= 0.0) {
+        return nodes[id].fixed_width;
+    }
+    return max(nodes[id].min_width, nodes[id].unconstrained_content_width);
+}
+
 fn process_node_width(id: u32) {
     let count = nodes[id].child_count;
-    
+
     // Visibility Check
     if ((nodes[id].flags & 1u) == 0u) {
-        nodes[id].desired_width = 0.0;
-        return;
-    }
-    
-    if (nodes[id].fixed_width >= 0.0) {
-        nodes[id].desired_width = nodes[id].fixed_width;
+        nodes[id].unconstrained_content_width = 0.0;
         return;
     }
 
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
-        nodes[id].desired_width = max(nodes[id].style_basis, result.width);
+        nodes[id].unconstrained_content_width = result.width;
     } else {
         var result_width = 0.0;
         let start = nodes[id].child_start_index;
-        
+
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
                 // POS ABSOLUTE CHECK
                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_width = max(result_width, nodes[start + i].desired_width);
+                    result_width = max(result_width, get_negotiated_width(start + i));
                 }
             }
         } else { // Row (Default)
             for (var i = 0u; i < count; i = i + 1u) {
                  // POS ABSOLUTE CHECK
                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_width += nodes[start + i].desired_width;
+                    result_width += get_negotiated_width(start + i);
                 }
             }
         }
-        nodes[id].desired_width = max(nodes[id].style_basis, result_width);
+        nodes[id].unconstrained_content_width = result_width;
     }
 }
 
@@ -213,12 +214,8 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
             
             if (nodes[id].position_mode == 1u) {
-                // Absolute: Use fixed or desired
-                 if (nodes[id].fixed_width >= 0.0) {
-                    nodes[id].final_width = nodes[id].fixed_width;
-                 } else {
-                    nodes[id].final_width = nodes[id].desired_width;
-                 }
+                // Absolute: Use negotiated width
+                nodes[id].final_width = get_negotiated_width(id);
             } else {
                 // Relative/Flex
                 if (nodes[parent_id].flex_direction == 1u) { // Column
@@ -231,13 +228,13 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if (nodes[id].fixed_width >= 0.0) {
                         nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        let parent_desired = nodes[parent_id].desired_width;
+                        let parent_unconstrained = nodes[parent_id].unconstrained_content_width;
                         let parent_final = nodes[parent_id].final_width;
-                        let my_desired = nodes[id].desired_width;
+                        let my_negotiated = get_negotiated_width(id);
                         
-                        if (parent_desired > 0.0) {
-                            let ratio = parent_final / parent_desired;
-                            nodes[id].final_width = my_desired * ratio;
+                        if (parent_unconstrained > 0.0) {
+                            let ratio = parent_final / parent_unconstrained;
+                            nodes[id].final_width = my_negotiated * ratio;
                         } else {
                             nodes[id].final_width = 0.0;
                         }
