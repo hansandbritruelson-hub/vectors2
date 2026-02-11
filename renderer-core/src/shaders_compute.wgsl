@@ -29,8 +29,13 @@ struct Node {
     flags: u32, // Bit 0 = Visible
     natural_content_width: f32,
     
+    // --- Texture Atlas UVs ---
+    uv_min_x: f32, 
+    uv_min_y: f32, 
+    uv_max_x: f32, 
+    uv_max_y: f32,
+    
     // --- Padding to 128 bytes ---
-    _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
     _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
 };
 

@@ -102,4 +102,42 @@ mod tests {
         engine.borrow_mut().render();
         assert_eq!(engine.borrow().get_node_count(), 3);
     }
+    #[test]
+    fn test_atlas_memory_management() {
+        use crate::texture_atlas::{TextureAtlas, CacheKey};
+        use std::rc::Rc;
+        
+        // 1024x1024 atlas
+        let mut atlas = TextureAtlas::new(1024, 1024);
+        let key = CacheKey { id: "test".to_string(), width: 100, height: 100 };
+        // Create dummy pixels
+        let pixels = vec![0u8; (100 * 100 * 4) as usize];
+        
+        // 1. Allocate
+        let handle = atlas.allocate(key.clone(), pixels).expect("Allocation failed");
+        assert_eq!(Rc::strong_count(&handle), 1);
+        
+        // 2. Clone Handle (Ref Count 2)
+        let handle2 = handle.clone();
+        assert_eq!(Rc::strong_count(&handle), 2);
+        
+        // 3. Drop one
+        drop(handle);
+        // Handle still alive via handle2, so NOT deallocated
+        atlas.process_deletions();
+        
+        // 4. Drop last one
+        // This should push ID to the queue
+        drop(handle2);
+        
+        // 5. Process Deletions
+        // This should trigger the DeallocationQueue and free the space in allocator
+        atlas.process_deletions();
+        
+        // 6. Check if cache cleared (Weak ref dead)
+        // Since we dropped all Rcs, the Weak in cache should be upgradable to None
+        let h3 = atlas.get_handle(&key);
+        assert!(h3.is_none(), "Cache should allow handle to die");
+    }
 }
+

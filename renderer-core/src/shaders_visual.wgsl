@@ -29,8 +29,13 @@ struct Node {
     flags: u32, // Bit 0 = Visible
     natural_content_width: f32,
     
+    // --- Texture Atlas UVs ---
+    uv_min_x: f32, 
+    uv_min_y: f32, 
+    uv_max_x: f32, 
+    uv_max_y: f32,
+    
     // --- Padding to 128 bytes ---
-    _pad0: u32, _pad1: u32, _pad2: u32, _pad3: u32,
     _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
 };
 
@@ -120,7 +125,10 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
-    out.local_pos = uv;
+    // Map 0..1 UV to Atlas UV
+    let atlas_u = mix(node.uv_min_x, node.uv_max_x, uv.x);
+    let atlas_v = mix(node.uv_min_y, node.uv_max_y, uv.y);
+    out.local_pos = vec2<f32>(atlas_u, atlas_v);
     out.glyph_index = 0u;
     out.flags = node.flags;
     return out;

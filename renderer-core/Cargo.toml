@@ -14,5 +14,6 @@ resvg = "0.29.0"
 tiny-skia = "0.8.4"
 usvg = "0.29.0"
 image = { version = "0.24", default-features = false, features = ["png", "jpeg"] }
+guillotiere = "0.6.2"
 [dependencies.wasm-bindgen-futures]
 version = "0.4"

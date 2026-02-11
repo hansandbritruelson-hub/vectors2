@@ -41,7 +41,9 @@ pub struct FlexRenderer {
     glyph_info_buffer: Option<GpuBuffer>,
 
     // Image Resources
-    test_texture: Option<GpuTexture>,
+    atlas_texture: Option<GpuTexture>,
+    atlas_width: u32,
+    atlas_height: u32,
     sampler: Option<GpuSampler>,
 
     pipeline_reset_signals: Option<GpuComputePipeline>,
@@ -95,7 +97,9 @@ impl FlexRenderer {
             bind_group_render: None,
             bind_group_layout_compute: None,
             bind_group_layout_render: None,
-            test_texture: None,
+            atlas_texture: None,
+            atlas_width: 0,
+            atlas_height: 0,
             sampler: None,
         }
     }
@@ -282,7 +286,9 @@ impl FlexRenderer {
         let dest = GpuImageCopyTexture::new(&placeholder_tex);
         self.device.queue().write_texture_with_u8_array(&dest, &white_pixel, &layout, &extent);
         
-        self.test_texture = Some(placeholder_tex);
+        self.atlas_texture = Some(placeholder_tex);
+        self.atlas_width = 1;
+        self.atlas_height = 1;
 
         let make_buffer_binding = |buffer: &GpuBuffer| -> Object {
              let obj = Object::new();
@@ -308,7 +314,7 @@ impl FlexRenderer {
         entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())));
         entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())));
         
-        let tex_view: Object = self.test_texture.as_ref().unwrap().create_view().into();
+        let tex_view: Object = self.atlas_texture.as_ref().unwrap().create_view().into();
         entries.push(&GpuBindGroupEntry::new(5, &tex_view));
         
         let sampler: Object = self.sampler.as_ref().unwrap().clone().into();
@@ -420,41 +426,71 @@ impl FlexRenderer {
             }
         }
         
-        // Texture Updates
+        // Texture Updates (Texture Atlas)
         let mut rebind_needed = false;
         {
             let mut engine = self.engine.borrow_mut();
-            if engine.image_dirty {
-                // log("Renderer: Detected dirty image. Uploading...");
-                let width = engine.image_width;
-                let height = engine.image_height;
-                let data = &engine.image_data;
+            if engine.texture_atlas.dirty {
+                let atlas = &mut engine.texture_atlas;
+                let needed_width = atlas.width;
+                let needed_height = atlas.height;
                 
-                if width > 0 && height > 0 && !data.is_empty() {
-                    // Create new texture
-                    let size = js_sys::Array::of2(&width.into(), &height.into());
-                    let tex_desc = GpuTextureDescriptor::new(&size, "rgba8unorm", GpuTextureUsage::TEXTURE_BINDING | GpuTextureUsage::COPY_DST | GpuTextureUsage::RENDER_ATTACHMENT);
-                    let texture = self.device.create_texture(&tex_desc);
-                    
-                    let layout = GpuImageDataLayout::new(width * 4, height);
-                    let extent = GpuExtent3D::new(width, height);
-                    let dest = GpuImageCopyTexture::new(&texture);
-                    
-                    self.device.queue().write_texture_with_u8_array(&dest, data, &layout, &extent);
-                    /* log(&format!("    Char '{}' (idx: {}): glyph={}, advance={}", 
-         char_val as u8 as char, 
-         global_char_idx, 
-         glyph_idx, 
-         advance)); */
-                    if let Some(old) = &self.test_texture {
-                        let old_tex: &GpuTexture = old;
-                        old_tex.destroy();
+                // Check if current texture matches needed size
+                let mut recreate = false;
+                if let Some(_tex) = &self.atlas_texture {
+                    if self.atlas_width != needed_width || self.atlas_height != needed_height {
+                         recreate = true;
                     }
-                    self.test_texture = Some(texture);
-                    engine.image_dirty = false;
-                    rebind_needed = true;
-                    // log("Renderer: Image uploaded successfully.");
+                } else {
+                    recreate = true;
                 }
+                
+                if recreate {
+                     if let Some(old) = &self.atlas_texture {
+                          let old_tex: &GpuTexture = old;
+                          old_tex.destroy();
+                     }
+                     
+                     let size = js_sys::Array::of2(&needed_width.into(), &needed_height.into());
+                     let tex_desc = GpuTextureDescriptor::new(&size, "rgba8unorm", GpuTextureUsage::TEXTURE_BINDING | GpuTextureUsage::COPY_DST | GpuTextureUsage::RENDER_ATTACHMENT);
+                     self.atlas_texture = Some(self.device.create_texture(&tex_desc));
+                     self.atlas_width = needed_width;
+                     self.atlas_height = needed_height;
+                     rebind_needed = true;
+                     log(&format!("Created Texture Atlas GPU Texture: {}x{}", needed_width, needed_height));
+                }
+                
+                // Upload Pending Regions
+                // Note: If we recreated the texture, do we need to re-upload *everything*?
+                // Yes. The new texture is empty.
+                // But `pending_uploads` only contains *new* stuff.
+                // If we recreated, we need the *entire* atlas data.
+                // `TextureAtlas` has `data` (shadow copy).
+                // If `recreate` is true, we should upload the *whole* `atlas.data`.
+                
+                if recreate {
+                     // We recreated the texture (it's empty).
+                     // We must upload whatever is in pending_uploads.
+                     // Note: If we had "old" data that wasn't pending, it is LOST here because we removed shadow copy.
+                     // This is the tradeoff.
+                     // However, since we only recreate on startup (or if we implemented resize), startup is fine.
+                     // If we resize, we need to re-add all assets to valid regions.
+                     // For now, just process pending uploads below.
+                }
+                // Always upload pending updates
+                let tex = self.atlas_texture.as_ref().unwrap();
+                for (region, pixels) in atlas.pending_uploads.drain(..) {
+                     let layout = GpuImageDataLayout::new(region.width * 4, region.height);
+                     let extent = GpuExtent3D::new(region.width, region.height);
+                     let dest = GpuImageCopyTexture::new(tex);
+                     
+                     let origin = js_sys::Array::of3(&region.x.into(), &region.y.into(), &0.into());
+                     Reflect::set(&dest, &"origin".into(), &origin).unwrap();
+                     
+                     self.device.queue().write_texture_with_u8_array(&dest, &pixels, &layout, &extent);
+                }
+                
+                atlas.dirty = false;
             }
         }
         
@@ -673,7 +709,7 @@ impl FlexRenderer {
         entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())));
         entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())));
         
-        let tex_view: Object = self.test_texture.as_ref().unwrap().create_view().into();
+        let tex_view: Object = self.atlas_texture.as_ref().unwrap().create_view().into();
         entries.push(&GpuBindGroupEntry::new(5, &tex_view));
         
         let sampler: Object = self.sampler.as_ref().unwrap().clone().into();

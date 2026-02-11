@@ -3,14 +3,16 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 use wasm_bindgen_futures::JsFuture;
 use image::io::Reader as ImageReader;
 use std::io::Cursor;
+use std::collections::HashMap;
 use crate::web_bindings::download_image;
-// use tiny_skia::{Pixmap, Transform};
-// use usvg::{Options, Tree, FitTo};
+use tiny_skia::{Pixmap, Transform};
+use usvg::{Options, Tree, FitTo};
 
 pub mod renderer;
 pub mod ui;
 pub mod web_bindings;
 pub mod signals;
+pub mod texture_atlas;
 #[cfg(test)]
 mod tests;
 pub use renderer::FlexRenderer;
@@ -249,11 +251,16 @@ pub struct GpuNode {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32,       // Bit 0 = Visible
+    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image
     pub natural_content_width: f32,
 
+    // --- Texture Atlas UVs ---
+    pub uv_min_x: f32, 
+    pub uv_min_y: f32, 
+    pub uv_max_x: f32, 
+    pub uv_max_y: f32,
+    
     // --- Padding to 128 bytes ---
-    pub _pad0: u32, pub _pad1: u32, pub _pad2: u32, pub _pad3: u32,
     pub _pad4: u32, pub _pad5: u32, pub _pad6: u32, // Removed pad7 due to fixed_height
 }
 
@@ -290,7 +297,7 @@ impl GpuNode {
             text_length: 0,
             flags: 1, // Default to 1 (Visible)
             natural_content_width: 0.0,
-            _pad0: 0, _pad1: 0, _pad2: 0, _pad3: 0,
+            uv_min_x: 0.0, uv_min_y: 0.0, uv_max_x: 0.0, uv_max_y: 0.0,
             _pad4: 0, _pad5: 0, _pad6: 0,
         }
     }
@@ -319,6 +326,13 @@ pub struct CpuNode {
     
     // Text
     pub text: Option<String>,
+    pub image_asset_id: Option<String>,
+    
+    // Cache
+    #[cfg(target_arch = "wasm32")] // Or just always
+    pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
 }
 
 impl CpuNode {
@@ -341,6 +355,8 @@ impl CpuNode {
             flags: 1,
             
             text: None,
+            image_asset_id: None,
+            cached_texture: None,
         }
     }
 }
@@ -397,15 +413,11 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
 
-    // --- Image Support ---
+    // --- Image Support (Texture Atlas) ---
     #[wasm_bindgen(skip)]
-    pub image_width: u32,
+    pub texture_atlas: texture_atlas::TextureAtlas,
     #[wasm_bindgen(skip)]
-    pub image_height: u32,
-    #[wasm_bindgen(skip)]
-    pub image_data: Vec<u8>,
-    #[wasm_bindgen(skip)]
-    pub image_dirty: bool,
+    pub assets: HashMap<String, Vec<u8>>,
 
     pub dirty: bool,
 }
@@ -428,10 +440,8 @@ impl FlexEngine {
             descender: 0.0,
             line_gap: 0.0,
             face: None,
-            image_width: 0,
-            image_height: 0,
-            image_data: Vec::new(),
-            image_dirty: false,
+            texture_atlas: texture_atlas::TextureAtlas::new(2048, 2048),
+            assets: HashMap::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -496,15 +506,7 @@ impl FlexEngine {
 
 // ...
 
-    // Returns true if image data was updated
-    pub fn set_image_data(&mut self, width: u32, height: u32, data: Vec<u8>) {
-        self.image_width = width;
-        self.image_height = height;
-        self.image_data = data;
-        self.image_dirty = true;
-        self.mark_dirty();
-        log(&format!("Image loaded into engine: {}x{}", width, height));
-    }
+
 
 
     pub fn add_node(&mut self, min_width: f32) -> u32 {
@@ -653,6 +655,82 @@ impl FlexEngine {
     // --- Flattening (CPU -> GPU) ---
     // This is the bridge. Rebuilds gpu_nodes from cpu_nodes.
     fn flatten(&mut self) {
+        // 0. Pre-pass: Texture Management
+        self.texture_atlas.process_deletions();
+
+        for i in 0..self.cpu_nodes.len() {
+             // We work around borrow checker by extracting needed data first if possible,
+             // or just carefully using indices.
+             // We need to mutate `cached_texture`.
+             
+             // Clone ID to avoid borrow issues while mutating
+             let (image_id, w, h) = {
+                 let node = &self.cpu_nodes[i];
+                 if let Some(ref id) = node.image_asset_id {
+                     let w = if node.fixed_width > 0.0 { node.fixed_width as u32 } else { 64 };
+                     let h = if node.fixed_height > 0.0 { node.fixed_height as u32 } else { 64 };
+                     (Some(id.clone()), w, h)
+                 } else {
+                     (None, 0, 0)
+                 }
+             };
+
+             if let Some(id) = image_id {
+                 // Check if current cache is valid
+                 let mut needs_update = true;
+                 if let Some(handle) = &self.cpu_nodes[i].cached_texture {
+                      // We assume if handle exists, it matches the ID (since we clear on ID change)
+                      // We just check dims.
+                      if handle.region.width == w && handle.region.height == h {
+                          needs_update = false;
+                      }
+                 }
+
+                 if needs_update {
+                      // Try to get existing handle from Atlas Cache
+                      let key = texture_atlas::CacheKey { id: id.clone(), width: w, height: h };
+                      
+                      let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
+                           Some(h)
+                      } else {
+                           // Not in atlas. Need to load/resize/allocate.
+                           if let Some(bytes) = self.assets.get(&id).cloned() {
+                                let is_svg = id.ends_with(".svg") || (bytes.len() > 4 && bytes.as_slice().starts_with(b"<svg"));
+                                let pixels: Option<Vec<u8>> = if is_svg {
+                                     let opt = usvg::Options::default();
+                                     if let Ok(tree) = usvg::Tree::from_data(&bytes, &opt) {
+                                          let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap_or(tiny_skia::Pixmap::new(1, 1).unwrap());
+                                          let current_w = tree.size.width();
+                                          let current_h = tree.size.height();
+                                          let sx = w as f32 / current_w as f32;
+                                          let sy = h as f32 / current_h as f32;
+                                          let ts = tiny_skia::Transform::from_scale(sx, sy);
+                                          resvg::render(&tree, usvg::FitTo::Size(w, h), ts, pixmap.as_mut());
+                                          Some(pixmap.data().to_vec())
+                                     } else {  log(&format!("Failed to parse SVG for atlas: {}", id)); None }
+                                } else {
+                                     if let Ok(img) = image::load_from_memory(&bytes) {
+                                          let resized = img.resize_exact(w, h, image::imageops::FilterType::Lanczos3);
+                                          Some(resized.to_rgba8().into_raw())
+                                     } else { log(&format!("Failed to load image for atlas: {}", id)); None }
+                                };
+                                
+                                if let Some(p) = pixels {
+                                    self.texture_atlas.allocate(key, p)
+                                } else {
+                                    None
+                                }
+                           } else {
+                               // Asset not found yet
+                               None
+                           }
+                      };
+                      
+                      self.cpu_nodes[i].cached_texture = new_handle;
+                 }
+             }
+        }
+
         self.gpu_nodes.clear();
         self.characters.clear(); // Rebuild chars too since they depend on node index
         
@@ -789,6 +867,16 @@ impl FlexEngine {
 
                 gpu_node.z_index = cpu_node.z_index.unwrap_or(parent_z);
                 
+                // Image UV Resolution
+                if let Some(handle) = &cpu_node.cached_texture {
+                    let region = &handle.region;
+                    gpu_node.uv_min_x = region.u_min;
+                    gpu_node.uv_min_y = region.v_min;
+                    gpu_node.uv_max_x = region.u_max;
+                    gpu_node.uv_max_y = region.v_max;
+                    gpu_node.flags |= 2; // Ensure flag is set
+                }
+                
                 // Text Handling (Rebuild Characters)
                 if let Some(text_content) = &cpu_node.text {
                      let chars_start = self.characters.len() as u32;
@@ -881,6 +969,16 @@ impl FlexEngine {
     pub fn set_text(&mut self, node_index: u32, text: &str) {
         if (node_index as usize) >= self.cpu_nodes.len() { return; }
         self.cpu_nodes[node_index as usize].text = Some(text.to_string());
+        self.mark_dirty();
+    }
+
+    pub fn set_image_asset_id(&mut self, node_index: u32, asset_id: &str) {
+        if (node_index as usize) >= self.cpu_nodes.len() { return; }
+        self.cpu_nodes[node_index as usize].image_asset_id = Some(asset_id.to_string());
+        // Clear value cache to force re-fetch
+        self.cpu_nodes[node_index as usize].cached_texture = None;
+        
+        self.cpu_nodes[node_index as usize].flags |= 2;
         self.mark_dirty();
     }
 
@@ -1039,10 +1137,10 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
         let clean_path = path.trim_start_matches('/');
         
         if let Some(asset_bytes) = get_asset(clean_path) {
-            log(&format!("Asset found: {}", clean_path));
+            log(&format!("Asset found in bundle: {}", clean_path));
             bytes = asset_bytes.to_vec();
         } else {
-            log(&format!("Asset NOT found: {}", clean_path));
+            log(&format!("Asset NOT found in bundle: {}", clean_path));
             return;
         }
     } else {
@@ -1065,57 +1163,56 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
     // Since we control assets, extension is fine. For HTTP, we might need to guess.
     // Let's check if it looks like SVG (starts with <svg or has .svg extension in URL)
     
-    let is_svg = url.ends_with(".svg") || (bytes.len() > 4 && &bytes[0..4] == b"<svg");
-
-    if is_svg {
-        log("Decoding SVG...");
-        // Render SVG to RGBA
-        let opt = usvg::Options::default();
-        let tree = match usvg::Tree::from_data(&bytes, &opt) {
-            Ok(t) => t,
-            Err(e) => {
-                log(&format!("Failed to parse SVG: {}", e));
-                return;
-            }
-        };
-
-        // Determine size.
-        let width = tree.size.width().ceil() as u32;
-        let height = tree.size.height().ceil() as u32;
-        
-        // Ensure at least 1x1
-        let width = if width == 0 { 1 } else { width };
-        let height = if height == 0 { 1 } else { height };
-        
-        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
-        
-        resvg::render(&tree, usvg::FitTo::Original, tiny_skia::Transform::default(), pixmap.as_mut());
-        
-        let data = pixmap.data().to_vec();
-        
-        // Convert BGRA / RGBA. tiny-skia is usually RGBA (premultiplied?).
-        // tiny-skia documentation says: "The pixels are stored in a premultiplied RGBA 8888 format."
-        // Our renderer expects... RGBA?
-        // Let's assume RGBA for now.
-        
-        engine.borrow_mut().set_image_data(width, height, data);
-        
+    // Simplified: Just store the source bytes. Flatten will handle resizing/rendering.
+    // Determine ID from URL
+    let id = if url.starts_with("asset:") {
+        url.trim_start_matches("asset:").trim_start_matches('/').to_string()
     } else {
-        // Normal Image
-        let img = image::load_from_memory(&bytes);
-        match img {
-            Ok(dynamic_img) => {
-                let rgba = dynamic_img.to_rgba8();
-                let w = rgba.width();
-                let h = rgba.height();
-                let data = rgba.into_raw();
-                
-                // Only now acquire the lock
-                engine.borrow_mut().set_image_data(w, h, data);
-            },
-            Err(e) => {
-                 log(&format!("Failed to decode image: {:?}", e));
-            }
+        url.clone()
+    };
+    
+    engine.borrow_mut().add_asset(id, bytes);
+    log(&format!("Asset loaded: {}", url));
+}
+
+#[wasm_bindgen]
+impl FlexEngine {
+    pub fn loaded_assets(&self) -> Vec<String> {
+        self.assets.keys().cloned().collect()
+    }
+}
+
+// --- Internal Methods (Not exposed to JS) ---
+impl FlexEngine {
+    pub fn add_image_to_atlas(&mut self, id: String, width: u32, height: u32, data: Vec<u8>) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {
+        let key = texture_atlas::CacheKey { id, width, height };
+        let handle = self.texture_atlas.allocate(key, data);
+        if handle.is_some() {
+            self.mark_dirty();
         }
+        handle
+    }
+
+    pub fn get_asset(&self, id: &str) -> Option<Vec<u8>> {
+        self.assets.get(id).cloned()
+    }
+
+    pub fn assign_image_to_node(&mut self, node_id: u32, region: texture_atlas::AtlasRegion) {
+        let idx = node_id as usize;
+        if idx < self.cpu_nodes.len() {
+           // We need to store this in CPU node?
+           // Currently CpuNode doesn't have UVs.
+           // We should add UVs to CpuNode to mirror GpuNode.
+        }
+    }
+    
+    // Stores raw asset data for resizing later
+    pub fn add_asset(&mut self, id: String, data: Vec<u8>) {
+        self.assets.insert(id, data);
+        self.mark_dirty();
+    }
+    
+    pub fn get_asset_data(&self, id: &str) -> Option<&Vec<u8>> {
+        self.assets.get(id)
     }
 }

@@ -26,6 +26,7 @@ pub struct Element {
     fixed_height: f32,
     color: Option<(f32, f32, f32, f32)>,
     text: Option<String>,
+    image_id: Option<String>,
     flex_direction: Option<u32>,
     abs_pos: Option<(f32, f32)>,
     z_index: Option<f32>,
@@ -45,6 +46,7 @@ impl Element {
             fixed_height: -1.0,
             color: None,
             text: None,
+            image_id: None,
             flex_direction: None,
             abs_pos: None,
             z_index: None,
@@ -61,6 +63,7 @@ impl Element {
     pub fn flags(mut self, f: u32) -> Self { self.flags = f; self }
     pub fn color(mut self, r: f32, g: f32, b: f32, a: f32) -> Self { self.color = Some((r, g, b, a)); self }
     pub fn text(mut self, s: &str) -> Self { self.text = Some(s.to_string()); self }
+    pub fn image(mut self, id: &str) -> Self { self.image_id = Some(id.to_string()); self }
     pub fn row(mut self) -> Self { self.flex_direction = Some(0); self }
     pub fn col(mut self) -> Self { self.flex_direction = Some(1); self }
     pub fn absolute(mut self, top: f32, left: f32) -> Self { self.abs_pos = Some((top, left)); self }
@@ -83,7 +86,9 @@ impl Element {
             e.set_fixed_height(node_id, self.fixed_height);
             e.set_flags(node_id, self.flags);
             if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
+            if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
             if let Some(s) = self.text { e.set_text(node_id, &s); }
+            if let Some(id) = self.image_id { e.set_image_asset_id(node_id, &id); }
             if let Some(dir) = self.flex_direction { e.set_flex_direction(node_id, dir); }
             if let Some((t, l)) = self.abs_pos { e.set_position_absolute(node_id, t, l); }
             if let Some(z) = self.z_index { e.set_z_index(node_id, z); }
@@ -240,15 +245,15 @@ pub fn build_ui(engine: Rc<RefCell<FlexEngine>>) {
     // Root defaults to 100% VP width/height via shader logic.
     let root = div().row().color(0.1, 0.1, 0.1, 1.0)
         .child(
-            div().width(75.0).color(0.2, 0.2, 0.25, 1.0)
+            div().col().width(75.0).color(0.2, 0.2, 0.25, 1.0)
             .bind_text(sidebar_content)
             .child(
                  // Paintbrush Icon
-                 div().width(64.0).height(64.0).flags(3) 
+                 div().width(64.0).height(64.0).image("paintbrush.svg")
             )
             .child(
                  // Pencil Icon
-                 div().width(64.0).height(64.0).flags(3) 
+                 div().width(64.0).height(64.0).image("paintbrush.svg") // Reusing same asset for now
             )
         )
         .build(engine.clone(), None);
