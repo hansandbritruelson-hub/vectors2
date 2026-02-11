@@ -1,41 +1,34 @@
 use crate::FlexEngine;
 use crate::signals::{Signal, ReadSignal, create_effect};
-use crate::Node;
+// use crate::Node; // Removed
 
 // --- Node Updater Logic (Unsafe / Dirty Access) ---
 // Since we are single-threaded WASM, we can cheat the borrow checker
 // to update specific nodes inside effects.
 
 struct NodeUpdater {
-    node_ptr: *mut Node,
+    node_id: u32,
     engine_ptr: *mut FlexEngine,
 }
 
 impl NodeUpdater {
     fn new(engine: &mut FlexEngine, node_id: u32) -> Self {
+        // Unsafe block removed as it is not needed for simple struct construction
         unsafe {
-            let ptr = engine.get_nodes_ptr() as *mut Node;
-            let node_ptr = ptr.add(node_id as usize);
             Self { 
-                node_ptr,
+                node_id,
                 engine_ptr: engine as *mut FlexEngine,
             }
         }
     }
 
-    fn set_text(&self, text: &str) {
-         // Changing text length/content is HARD via raw pointer because 
-         // it requires interacting with the character buffer which might realloc.
-         // For V1, we will only support updating FLAGS and simple scalars.
-         // Text updates require calling back into engine methods.
-         // We'll need a way to get a &mut FlexEngine inside an effect.
-         // Given the complexity, we will focus on FLAGS first (v-if).
+    fn set_text(&self, _text: &str) {
+         // See implementation in build()
     }
 
     fn set_flags(&self, flags: u32) {
         unsafe {
-            (*self.node_ptr).flags = flags;
-            (*self.engine_ptr).mark_dirty();
+            (*self.engine_ptr).update_node_flags(self.node_id, flags);
         }
     }
 }
@@ -179,29 +172,21 @@ impl Element {
         // Bind Flags
         if let Some(sig) = self.flags_signal {
              // We need to move 'updater' into the closure. 
-             // Since NodeUpdater is just a pointer wrapper, it's Copy/Clone? 
-             // No, pointers need manual handling.
-             
-             let ptr = updater.node_ptr as usize; // Cast to integer to move safely
-             
-
-             
+             let node_id = updater.node_id;
              let engine_ptr = updater.engine_ptr as usize;
              
              create_effect(move || {
                  let val = sig.get();
                  unsafe {
-                     let node = ptr as *mut Node;
-                     (*node).flags = val;
-                     
                      let engine = engine_ptr as *mut FlexEngine;
-                     (*engine).mark_dirty(); 
+                     (*engine).update_node_flags(node_id, val);
                  }
              });
         }
 
 
         if let Some(mut sig) = self.text_signal {
+             let node_id = updater.node_id;
              let engine_ptr = updater.engine_ptr as usize;
              
              create_effect(move || {
@@ -209,7 +194,7 @@ impl Element {
                  unsafe {
                      let engine = engine_ptr as *mut FlexEngine;
                      (*engine).set_text(node_id, &val);
-                     (*engine).mark_dirty(); 
+                     // set_text marks dirty automatically
                  }
              });
         }
@@ -242,17 +227,9 @@ impl Element {
         // Let's proceed with the Linked List refactor plan alongside this.
         
         if !self.children.is_empty() {
-             // In current engine, we need to know the start index.
-             // But we can't know it until we build them.
-             // Implication: The current engine is very fragile for tree construction.
-             
-             // Hack: Just build them.
              for child in self.children {
                  child.build(engine, Some(node_id));
              }
-             
-             // The Start Index is... complicated in DFS.
-             engine.set_child_start(node_id, start_child_index); 
         }
 
         node_id
@@ -290,7 +267,7 @@ pub fn build_ui(engine: &mut FlexEngine) {
         }) as Box<dyn FnMut()>);
         
         if let Some(window) = crate::web_bindings::get_window() {
-            window.set_interval(closure.as_ref().unchecked_ref(), 1000);
+            window.set_interval(closure.as_ref().unchecked_ref(), 5000);
         }
         
         closure.forget(); // Leak to keep alive

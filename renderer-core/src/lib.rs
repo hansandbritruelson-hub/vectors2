@@ -200,7 +200,7 @@ pub struct KerningRecord {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct Node {
+pub struct GpuNode {
     // --- Layout Inputs ---
     pub fixed_width: f32,   // -1.0 = auto
     pub style_basis: f32,
@@ -228,7 +228,7 @@ pub struct Node {
     pub position_mode: u32, // 0 = Relative, 1 = Absolute
     pub flex_direction: u32, // 0 = Row, 1 = Column
 
-    // --- Tree Topology ---
+    // --- Tree Topology (GPU Linear) ---
     pub parent_index: u32,
     pub child_start_index: u32,
     pub child_count: u32,
@@ -241,7 +241,7 @@ pub struct Node {
     pub _pad1: u32,
 }
 
-impl Node {
+impl GpuNode {
     pub fn new() -> Self {
         Self {
             fixed_width: -1.0,
@@ -273,6 +273,55 @@ impl Node {
     }
 }
 
+// --- The Logical CPU Node (DOM) ---
+#[derive(Clone, Debug)]
+pub struct CpuNode {
+    // Topology (Linked List)
+    pub parent: Option<usize>,
+    pub first_child: Option<usize>,
+    pub next_sibling: Option<usize>,
+    pub last_child: Option<usize>, // Optimization for append
+
+    // Properties (Mirrored from GpuNode Inputs)
+    pub fixed_width: f32,
+    pub style_basis: f32,
+    pub color: (f32, f32, f32, f32),
+    pub top_offset: f32,
+    pub left_offset: f32,
+    pub z_index: f32,
+    pub position_mode: u32,
+    pub flex_direction: u32,
+    pub flags: u32,
+    
+    // Text
+    pub text: Option<String>,
+}
+
+impl CpuNode {
+    pub fn new() -> Self {
+        Self {
+            parent: None,
+            first_child: None,
+            next_sibling: None,
+            last_child: None,
+            
+            fixed_width: -1.0,
+            style_basis: 0.0,
+            color: (0.0, 0.0, 0.0, 0.0),
+            top_offset: 0.0,
+            left_offset: 0.0,
+            z_index: 0.0,
+            position_mode: 0,
+            flex_direction: 0, // Row
+            flags: 1,
+            
+            text: None,
+        }
+    }
+}
+
+
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct Character {
@@ -303,8 +352,11 @@ impl Character {
 }
 
 #[wasm_bindgen]
+#[wasm_bindgen]
 pub struct FlexEngine {
-    nodes: Vec<Node>,
+    cpu_nodes: Vec<CpuNode>, // The Logical DOM (Linked List)
+    gpu_nodes: Vec<GpuNode>, // The Render Tree (Flattened)
+    
     characters: Vec<Character>,
     glyph_data: Vec<GlyphData>,
     kerning_table: Vec<KerningRecord>,
@@ -328,10 +380,11 @@ pub struct FlexEngine {
 impl FlexEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> FlexEngine {
-        log("FlexEngine Initialized via WebAssembly");
+        log("FlexEngine Initialized via WebAssembly (CpuNode Topology)");
         
         let mut engine = FlexEngine {
-            nodes: Vec::new(),
+            cpu_nodes: Vec::new(),
+            gpu_nodes: Vec::new(),
             characters: Vec::new(),
             glyph_data: Vec::new(),
             kerning_table: Vec::new(),
@@ -341,7 +394,7 @@ impl FlexEngine {
             descender: 0.0,
             line_gap: 0.0,
             face: None,
-            dirty: true,
+            dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
         engine.parse_font();
@@ -400,126 +453,298 @@ impl FlexEngine {
     }
 
     pub fn add_node(&mut self, style_basis: f32) -> u32 {
-
-        let mut node = Node::new();
+        let mut node = CpuNode::new();
         node.style_basis = style_basis;
-        let index = self.nodes.len() as u32;
-        
-        // Default parent to self (root) or 0 to be safe
-        node.parent_index = if index == 0 { 0 } else { 0 }; 
-        
-        self.nodes.push(node);
+        let index = self.cpu_nodes.len() as u32;
+        self.cpu_nodes.push(node);
+        self.mark_dirty();
         index
     }
 
-    // Basic tree building - set parent
-    pub fn set_parent(&mut self, child_index: u32, parent_index: u32) {
-        if (child_index as usize) < self.nodes.len() && (parent_index as usize) < self.nodes.len() {
-            self.nodes[child_index as usize].parent_index = parent_index;
-            // Note: In a real implementation we would also need to update 
-            // parent.child_start_index and parent.child_count, or use a separate child array 
-            // and linking step. For the "Last Worker" pattern, parent_index is critical.
-            
-            // Increment child count on parent (naive implementation for now)
-            self.nodes[parent_index as usize].child_count += 1;
+    // --- Topology Management (Linked List Wiring) ---
+
+    pub fn set_parent(&mut self, child_id: u32, parent_id: u32) {
+        let child_idx = child_id as usize;
+        let parent_idx = parent_id as usize;
+        
+        if child_idx >= self.cpu_nodes.len() || parent_idx >= self.cpu_nodes.len() {
+            log("Invalid node index in set_parent");
+            return;
         }
+        
+        // 1. Unlink from old parent (if any) - Skipped for V1 (assuming add-only for now)
+        // Note: For full DOM, we need 'remove_from_parent' here.
+
+        // 2. Link to new parent
+        self.cpu_nodes[child_idx].parent = Some(parent_idx);
+        
+        // 3. Append to parent's child list
+        if let Some(last_child) = self.cpu_nodes[parent_idx].last_child {
+            // Parent has children. Append to last.
+            self.cpu_nodes[last_child].next_sibling = Some(child_idx);
+            self.cpu_nodes[parent_idx].last_child = Some(child_idx);
+        } else {
+            // First child
+            self.cpu_nodes[parent_idx].first_child = Some(child_idx);
+            self.cpu_nodes[parent_idx].last_child = Some(child_idx);
+        }
+        
+        self.mark_dirty();
+    }
+    
+    // Deprecated / No-op in linked list mode (implicit)
+    pub fn set_child_start(&mut self, _parent_index: u32, _start_index: u32) {
+        // No-op
     }
 
-    pub fn set_child_start(&mut self, parent_index: u32, start_index: u32) {
-        if (parent_index as usize) < self.nodes.len() {
-            self.nodes[parent_index as usize].child_start_index = start_index;
+    // --- Flattening (CPU -> GPU) ---
+    // This is the bridge. Rebuilds gpu_nodes from cpu_nodes.
+    fn flatten(&mut self) {
+        self.gpu_nodes.clear();
+        self.characters.clear(); // Rebuild chars too since they depend on node index
+        
+        // We need to map CPU Index -> GPU Index to fix up text/chars
+        // But for now, let's just Traverse.
+        
+        // Queue for BFS or Stack for DFS?
+        // Layout engine (compute shader) expects:
+        // - Parents appear before children? (Top Down passes)
+        // - Children of a parent are contiguous? (Bottom Up width summation)
+        // YES. Contiguous children is the Hard Constraint.
+        // DFS Pre-order traversal does NOT guarantee contiguous children in global array?
+        // Wait. Parent A. Children B, C.
+        // DFS: A, B, [B's children...], C...
+        // In array: [A, B, ..., C] -> B and C are NOT contiguous. C is far away.
+        
+        // Compute Shader `width_bottom_up` loops `start` to `start + count`.
+        // It IMPLICITLY assumes `nodes[start + i]` accesses the i-th child.
+        // This means children MUST be contiguous in the buffer.
+        
+        // PROBLEM: DFS Pre-order separates siblings by the entire subtree of the sibling.
+        // SOLUTION: Layout order must be: [Parent, Child1, Child2, Child3, Child1_Subtree...] ?
+        // No. If Parent refers to `start`, and loop iterates `count`, then Child1...ChildN MUST be adjacent.
+        // [Parent, Child1, Child2, Child3, ... Grandchildren ... ]
+        // This implies Breadth-First-ish grouping?
+        
+        // Structure:
+        // [Roots...]
+        // [Layer 1 Children...]
+        // [Layer 2 Children...]
+        
+        // BUT: Parent needs to know `child_start_index`.
+        // If we put all Layer 1 children together, they are contiguous.
+        // Parent A (at 0) has children B, C (at 10, 11).
+        // Parent D (at 1) has children E, F (at 12, 13).
+        // This works! BFS Layout.
+        
+        // Algorithm:
+        // 1. Queue<CpuIndex>
+        // 2. While Queue not empty:
+        //    Pop Parent.
+        //    If Parent has children:
+        //       Record `child_start` = current_gpu_len.
+        //       Iterate list (first_child -> next_sibling):
+        //           Push Child to Queue.
+        //           Append Child to gpu_nodes.
+        //           (Map cpu_idx -> gpu_idx for referencing if needed)
+        
+        // Wait, `parent_index` in GpuNode points back to Parent.
+        // If we do BFS, Parent is already placed. We know its GPU index.
+        
+        // Let's implement BFS Flattening.
+        
+        // Map CPU Node Index -> GPU Node Index
+        let mut cpu_to_gpu: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+        
+        if self.cpu_nodes.is_empty() { return; }
+        
+        // We assume Node 0 is Root?
+        // Let's find all roots (nodes with no parent).
+        // For simple single-root UI:
+        let root_idx = 0; // Assumption
+        
+        // To handle "forests", we might iterate all, but let's assume single root for now.
+        
+        // Step 1: Push Root
+        self.gpu_nodes.push(GpuNode::new()); // Placeholder for Root
+        // We'll update Root's data later.
+        cpu_to_gpu.insert(root_idx, 0);
+        
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(root_idx);
+        
+        while let Some(cpu_idx) = queue.pop_front() {
+            let gpu_idx = *cpu_to_gpu.get(&cpu_idx).unwrap();
+            
+            // 1. Copy Data from CPU Node to GPU Node
+            // (We do this here to ensure mapped index is ready)
+            let cpu_node = &self.cpu_nodes[cpu_idx];
+            
+            // We need to mutate the GPU node which is already in the vec
+            // But we also need to append children, which might realloc.
+            // Safe indices.
+            
+            // Calculate Children Range
+            let start_child_gpu_idx = self.gpu_nodes.len() as u32;
+            let mut child_count = 0;
+            
+            // Iterate Children to reserve/push placeholders
+            let mut curr_child = cpu_node.first_child;
+            while let Some(child_cpu_idx) = curr_child {
+                let kid_gpu_idx = self.gpu_nodes.len() as u32;
+                self.gpu_nodes.push(GpuNode::new()); // Placeholder
+                cpu_to_gpu.insert(child_cpu_idx, kid_gpu_idx);
+                
+                queue.push_back(child_cpu_idx);
+                
+                child_count += 1;
+                curr_child = self.cpu_nodes[child_cpu_idx].next_sibling;
+            }
+            
+            // Now update the Parent Node with child info
+            {
+                let gpu_node = &mut self.gpu_nodes[gpu_idx as usize];
+                // Mirror Props
+                gpu_node.fixed_width = cpu_node.fixed_width;
+                gpu_node.style_basis = cpu_node.style_basis;
+                gpu_node.color_r = cpu_node.color.0;
+                gpu_node.color_g = cpu_node.color.1;
+                gpu_node.color_b = cpu_node.color.2;
+                gpu_node.color_a = cpu_node.color.3;
+                gpu_node.top_offset = cpu_node.top_offset;
+                gpu_node.left_offset = cpu_node.left_offset;
+                gpu_node.z_index = cpu_node.z_index;
+                gpu_node.position_mode = cpu_node.position_mode;
+                gpu_node.flex_direction = cpu_node.flex_direction;
+                gpu_node.flags = cpu_node.flags; // Visibility
+                
+                // Topology
+                gpu_node.child_start_index = start_child_gpu_idx;
+                gpu_node.child_count = child_count;
+                
+                // Parent Ref (Look up from cpu_node.parent)
+                if let Some(p_cpu) = cpu_node.parent {
+                    if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
+                         gpu_node.parent_index = p_gpu;
+                    }
+                } else {
+                     // Root points to self
+                     gpu_node.parent_index = 0;
+                }
+                
+                // Text Handling (Rebuild Characters)
+                if let Some(text) = &cpu_node.text {
+                     let chars_start = self.characters.len() as u32;
+                     let chars_vec: Vec<char> = text.chars().collect();
+                     let chars_len = chars_vec.len() as u32;
+                     
+                     for (i, &c) in chars_vec.iter().enumerate() {
+                        let val = c as u32;
+                        let glyph_id = if let Some(face) = &self.face {
+                            face.glyph_index(c).map(|g| g.0).unwrap_or(0)
+                        } else { 0 };
+                        
+                        let next_glyph_id = if i < chars_vec.len() - 1 {
+                             if let Some(face) = &self.face {
+                                face.glyph_index(chars_vec[i+1]).map(|g| g.0).unwrap_or(0)
+                            } else { 0 }
+                        } else { 0 };
+            
+                        self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, gpu_idx));
+                     }
+                     
+                     gpu_node.text_start = chars_start;
+                     gpu_node.text_length = chars_len;
+                }
+            }
         }
     }
     
     pub fn set_flex_direction(&mut self, node_index: u32, direction: u32) {
-        if (node_index as usize) < self.nodes.len() {
-            self.nodes[node_index as usize].flex_direction = direction;
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].flex_direction = direction;
+            self.mark_dirty();
         }
     }
 
     pub fn set_fixed_width(&mut self, node_index: u32, width: f32) {
-        if (node_index as usize) < self.nodes.len() {
-            self.nodes[node_index as usize].fixed_width = width;
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].fixed_width = width;
+            self.mark_dirty();
         }
     }
     
     // New Setters
     pub fn set_color(&mut self, node_index: u32, r: f32, g: f32, b: f32, a: f32) {
-        if (node_index as usize) < self.nodes.len() {
-            let node = &mut self.nodes[node_index as usize];
-            node.color_r = r;
-            node.color_g = g;
-            node.color_b = b;
-            node.color_a = a;
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].color = (r, g, b, a);
+            self.mark_dirty();
         }
     }
 
     pub fn set_position_absolute(&mut self, node_index: u32, top: f32, left: f32) {
-        if (node_index as usize) < self.nodes.len() {
-            let node = &mut self.nodes[node_index as usize];
+        if (node_index as usize) < self.cpu_nodes.len() {
+            let node = &mut self.cpu_nodes[node_index as usize];
             node.position_mode = 1;
             node.top_offset = top;
             node.left_offset = left;
+            self.mark_dirty();
         }
     }
 
     pub fn set_z_index(&mut self, node_index: u32, z_index: f32) {
-        if (node_index as usize) < self.nodes.len() {
-            self.nodes[node_index as usize].z_index = z_index;
+        if (node_index as usize) < self.cpu_nodes.len() {
+            self.cpu_nodes[node_index as usize].z_index = z_index;
+            self.mark_dirty();
         }
     }
 
-    pub fn set_text_length(&mut self, node_index: u32, length: u32) {
-        if (node_index as usize) < self.nodes.len() {
-            self.nodes[node_index as usize].text_length = length;
-        }
+    pub fn set_text_length(&mut self, _node_index: u32, _length: u32) {
+        // Automatically handled in flatten now
     }
 
     pub fn set_text(&mut self, node_index: u32, text: &str) {
-        if (node_index as usize) >= self.nodes.len() { return; }
-        
-        let start = self.characters.len() as u32;
-        let chars_vec: Vec<char> = text.chars().collect();
-        let len = chars_vec.len() as u32;
-        
-        for (i, &c) in chars_vec.iter().enumerate() {
-            let val = c as u32;
-            let glyph_id = if let Some(face) = &self.face {
-                face.glyph_index(c).map(|g| g.0).unwrap_or(0)
-            } else {
-                0
-            };
-            
-            let next_glyph_id = if i < chars_vec.len() - 1 {
-                 if let Some(face) = &self.face {
-                    face.glyph_index(chars_vec[i+1]).map(|g| g.0).unwrap_or(0)
-                } else { 0 }
-            } else { 0 };
-
-            self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, node_index));
-        }
-
-        self.nodes[node_index as usize].text_start = start;
-        self.nodes[node_index as usize].text_length = len;
+        if (node_index as usize) >= self.cpu_nodes.len() { return; }
+        self.cpu_nodes[node_index as usize].text = Some(text.to_string());
+        self.mark_dirty();
     }
 
-    pub fn get_nodes_ptr(&self) -> *const Node {
-        self.nodes.as_ptr()
+    pub fn get_nodes_ptr(&self) -> *const GpuNode {
+        // Panic if we access before flatten? Or just return?
+        self.gpu_nodes.as_ptr()
     }
 
-    pub fn get_node_count(&self) -> usize {
-        self.nodes.len()
+    pub fn get_node_count(&mut self) -> usize {
+        // Return GPU node count so the renderer allocates enough buffer
+        // This implies flatten() must be called BEFORE this.
+        self.render(); // Ensure fresh
+        self.gpu_nodes.len()
     }
     
     pub fn get_node_size(&self) -> usize {
-        std::mem::size_of::<Node>()
+        std::mem::size_of::<GpuNode>()
     }
 
     pub fn get_nodes_buffer(&self) -> js_sys::Uint8Array {
-        let size = self.nodes.len() * std::mem::size_of::<Node>();
-        let ptr = self.nodes.as_ptr() as *const u8;
+        // We MUST assume render() was called or call it here.
+        // But render() is likely usually called by the JS loop?
+        // Let's call flatten just in case dirty.
+        // self.render(); // recursive ref cell issue potentially if not careful?
+        // Assuming renderer calls render() then asks for buffer.
+        
+        let size = self.gpu_nodes.len() * std::mem::size_of::<GpuNode>();
+        let ptr = self.gpu_nodes.as_ptr() as *const u8;
         unsafe {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+    
+    // --- Public Render Entry ---
+    pub fn render(&mut self) {
+        // Renamed from internal implicit to explicit
+        if self.dirty {
+            self.flatten();
+            self.dirty = false;
         }
     }
 
@@ -588,18 +813,15 @@ impl FlexEngine {
 
     
     pub fn update_node_flags(&mut self, node_id: u32, flags: u32) {
-        if (node_id as usize) < self.nodes.len() {
-             self.nodes[node_id as usize].flags = flags;
+        if (node_id as usize) < self.cpu_nodes.len() {
+             self.cpu_nodes[node_id as usize].flags = flags;
              self.mark_dirty();
         }
     }
     
      pub fn update_node_color(&mut self, node_id: u32, r: f32, g: f32, b: f32, a: f32) {
-              let node = &mut self.nodes[node_id as usize];
-              node.color_r = r;
-              node.color_g = g;
-              node.color_b = b;
-              node.color_a = a;
+              let node = &mut self.cpu_nodes[node_id as usize];
+              node.color = (r, g, b, a);
               self.mark_dirty();
           }
     

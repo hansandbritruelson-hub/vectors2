@@ -41,7 +41,6 @@ const init = async () => {
     });
 
     const renderer = new FlexRenderer(device, context);
-    await renderer.init();
 
     // Push-based Render Loop
     let pendingFrame = false;
@@ -56,6 +55,8 @@ const init = async () => {
             requestAnimationFrame(renderFrame);
         }
     };
+
+    await renderer.init();
 
     // Initial render
     renderer.render();
