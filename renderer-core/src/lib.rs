@@ -24,6 +24,30 @@ include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
 
+#[derive(Clone, Debug)]
+pub enum StyleValue {
+    Px(f32),
+    Percent(f32),
+    Em(f32),
+    Vh(f32),
+    Vw(f32),
+    Color(f32, f32, f32, f32),
+    Ident(String),
+    String(String),
+    Auto,
+}
+
+#[derive(Clone, Debug)]
+pub struct StyleRule {
+    pub selector: String,
+    pub declarations: HashMap<String, StyleValue>,
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct StyleSheet {
+    pub rules: Vec<StyleRule>,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct GpuCurve {
@@ -323,6 +347,10 @@ pub struct CpuNode {
     pub text: Option<String>,
     pub image_asset_id: Option<String>,
     
+    // CSS Styles
+    pub classes: Vec<String>,
+    pub inline_styles: HashMap<String, StyleValue>,
+    
     // Cache
     #[cfg(target_arch = "wasm32")] // Or just always
     pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
@@ -354,6 +382,8 @@ impl CpuNode {
             
             text: None,
             image_asset_id: None,
+            classes: Vec::new(),
+            inline_styles: HashMap::new(),
             cached_texture: None,
             on_click: None,
         }
@@ -425,6 +455,9 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub assets: HashMap<String, Vec<u8>>,
 
+    #[wasm_bindgen(skip)]
+    pub stylesheet: StyleSheet,
+
     pub dirty: bool,
 }
 
@@ -450,6 +483,7 @@ impl FlexEngine {
             face: None,
             texture_atlas: texture_atlas::TextureAtlas::new(2048, 2048),
             assets: HashMap::new(),
+            stylesheet: StyleSheet::default(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -649,7 +683,80 @@ impl FlexEngine {
         self.cpu_nodes[parent_idx].last_child = None;
         self.mark_dirty();
     }
-    
+}
+
+impl FlexEngine {
+    pub fn add_style_rule(&mut self, selector: String, declarations: HashMap<String, StyleValue>) {
+        self.stylesheet.rules.push(StyleRule { selector, declarations });
+        self.mark_dirty();
+    }
+
+    fn apply_styles(&mut self, node_idx: usize) {
+        let mut resolved: HashMap<String, StyleValue> = HashMap::new();
+
+        // 1. Classes (very basic matching for now)
+        let classes = self.cpu_nodes[node_idx].classes.clone();
+        for class_name in &classes {
+            let dot_selector = format!(".{}", class_name);
+            for rule in &self.stylesheet.rules {
+                if rule.selector == *dot_selector || rule.selector == *class_name {
+                    for (prop, val) in &rule.declarations {
+                        resolved.insert(prop.clone(), val.clone());
+                    }
+                }
+            }
+        }
+
+        // 2. Inline overrides
+        let inline = self.cpu_nodes[node_idx].inline_styles.clone();
+        for (prop, val) in inline {
+            resolved.insert(prop, val);
+        }
+
+        // Update CpuNode fields based on resolved styles
+        for (prop, val) in resolved {
+            match prop.as_str() {
+                "width" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_width = v; }
+                }
+                "height" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_height = v; }
+                }
+                "color" | "background-color" => {
+                    if let StyleValue::Color(r, g, b, a) = val { self.cpu_nodes[node_idx].color = (r, g, b, a); }
+                }
+                "flex-direction" => {
+                    if let StyleValue::Ident(s) = val {
+                        match s.as_str() {
+                            "row" => self.cpu_nodes[node_idx].flex_direction = 0,
+                            "column" => self.cpu_nodes[node_idx].flex_direction = 1,
+                            _ => {}
+                        }
+                    }
+                }
+                "z-index" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].z_index = Some(v); }
+                }
+                "top" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].top_offset = v; }
+                }
+                "left" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].left_offset = v; }
+                }
+                "position" => {
+                    if let StyleValue::Ident(s) = val {
+                        match s.as_str() {
+                            "relative" => self.cpu_nodes[node_idx].position_mode = 0,
+                            "absolute" => self.cpu_nodes[node_idx].position_mode = 1,
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     // --- Topology Management (Linked List Wiring) ---
 
     // ... (existing topology methods)
@@ -664,10 +771,12 @@ impl FlexEngine {
     // --- Flattening (CPU -> GPU) ---
     // This is the bridge. Rebuilds gpu_nodes from cpu_nodes.
     fn flatten(&mut self) {
-        // 0. Pre-pass: Texture Management
+        // 0. Pre-pass: Style Application & Texture Management
         self.texture_atlas.process_deletions();
 
         for i in 0..self.cpu_nodes.len() {
+             self.apply_styles(i);
+             
              // We work around borrow checker by extracting needed data first if possible,
              // or just carefully using indices.
              // We need to mutate `cached_texture`.
@@ -975,7 +1084,10 @@ impl FlexEngine {
     pub fn set_text_length(&mut self, _node_index: u32, _length: u32) {
         // Automatically handled in flatten now
     }
+}
 
+#[wasm_bindgen]
+impl FlexEngine {
     pub fn set_text(&mut self, node_index: u32, text: &str) {
         if (node_index as usize) >= self.cpu_nodes.len() { return; }
         self.cpu_nodes[node_index as usize].text = Some(text.to_string());

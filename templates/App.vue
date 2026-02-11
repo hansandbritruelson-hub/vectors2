@@ -1,26 +1,26 @@
 <template>
-  <div class="main" row color="0.1, 0.1, 0.1, 1.0">
-    <div class="sidebar" col width="75" color="0.2, 0.2, 0.25, 1.0" @click="set_count.set(count.get() + 1)">
-      <div color="1,0,1,1">Count: {{ count }}</div>
+  <div class="main">
+    <div class="sidebar" @click="set_count.set(count.get() + 1)">
+      <div class="count-text">Count: {{ count }}</div>
       <div :text="sidebar_content"></div>
-      <div width="64" height="64" image="paintbrush.svg"></div>
-      <div width="64" height="64" image="paintbrush.svg"></div>
+      <div class="icon" image="paintbrush.svg"></div>
+      <div class="icon" image="paintbrush.svg"></div>
     </div>
     
-    <div class="right-pane" col color="0.15, 0.15, 0.15, 1.0">
-      <div class="row1" row color="0.2, 0.2, 0.2, 1.0">
-        <div color="0.3, 0.3, 0.35, 1.0">Row 1aa - Left Div</div>
-        <div color="0.35, 0.3, 0.3, 1.0">Row 1 - Right Div</div>
+    <div class="right-pane">
+      <div class="row1">
+        <div class="r1-left">Row 1aa - Left Div</div>
+        <div class="r1-right">Row 1 - Right Div</div>
       </div>
       
-      <div class="row2" row color="0.2, 0.25, 0.2, 1.0">
-        <div color="0.25, 0.35, 0.25, 1.0">This is a reasonably long piece of text that is intended to test the wrapping capabilities of our flex engine. It should flow nicely within its container.</div>
-        <div color="0.25, 0.25, 0.35, 1.0">Another long block of text here, serving as the second part of Row 2. We want to ensure that multiple wrapping blocks can coexist side-by-side in a row.</div>
+      <div class="row2">
+        <div class="r2-text1">This is a reasonably long piece of text that is intended to test the wrapping capabilities of our flex engine. It should flow nicely within its container.</div>
+        <div class="r2-text2">Another long block of text here, serving as the second part of Row 2. We want to ensure that multiple wrapping blocks can coexist side-by-side in a row.</div>
       </div>
       
-      <div class="row3" col color="0.1, 0.1, 0.1, 1.0">
+      <div class="row3">
         <div>Row 3: Keyed Reusable List (v4 Sample):</div>
-        <div v-for="user in users" color="0.3, 0.7, 0.3, 1.0">
+        <div v-for="user in users" class="user-item">
           {{ user.name }}
         </div>
       </div>
@@ -72,7 +72,45 @@
 </script>
 
 <style>
-.root {
-    display: flex;
+.main {
+    flex-direction: row;
+    background-color: #1a1a1a;
+}
+.sidebar {
+    flex-direction: column;
+    width: 75px;
+    background-color: #333340;
+}
+.count-text {
+    color: #ff00ff;
+}
+.icon {
+    width: 64px;
+    height: 64px;
+}
+.right-pane {
+    flex-direction: column;
+    background-color: #262626;
+}
+.row1 {
+    flex-direction: row;
+    background-color: #333333;
+}
+.r1-left { background-color: #4d4d59; }
+.r1-right { background-color: #594d4d; }
+
+.row2 {
+    flex-direction: row;
+    background-color: #334033;
+}
+.r2-text1 { background-color: #405940; }
+.r2-text2 { background-color: #404059; }
+
+.row3 {
+    flex-direction: column;
+    background-color: #1a1a1a;
+}
+.user-item {
+    background-color: #4db34d;
 }
 </style>

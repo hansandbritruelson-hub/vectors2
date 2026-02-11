@@ -1,9 +1,36 @@
 use crate::parser::{Template, Node, Element};
+use crate::css::{self, StyleValue};
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident};
 
 pub fn generate_rust(template: &Template) -> String {
     let mut id_gen = 0;
+    
+    // Parse CSS
+    let mut all_rules = Vec::new();
+    for style_content in &template.styles {
+        if let Ok((_, rules)) = css::parse_css(style_content) {
+            all_rules.extend(rules);
+        }
+    }
+
+    let mut style_registrations = Vec::new();
+    for rule in all_rules {
+        let selector = rule.selector;
+        let mut decl_tokens = Vec::new();
+        for (prop, val) in rule.declarations {
+            let val_tokens = style_value_to_tokens(&val);
+            decl_tokens.push(quote! { decls.insert(#prop.to_string(), #val_tokens); });
+        }
+        style_registrations.push(quote! {
+            {
+                let mut decls = std::collections::HashMap::new();
+                #(#decl_tokens)*
+                e.add_style_rule(#selector.to_string(), decls);
+            }
+        });
+    }
+
     let mut root_nodes = Vec::new();
     for node in &template.root {
         root_nodes.push(generate_node(node, None, &mut id_gen));
@@ -20,6 +47,9 @@ pub fn generate_rust(template: &Template) -> String {
         use std::cell::RefCell;
 
         pub fn build_generated_ui(engine: Rc<RefCell<FlexEngine>>) {
+            // Register Styles
+            register_styles(engine.clone());
+
             // Script Block
             #script_code
 
@@ -27,6 +57,11 @@ pub fn generate_rust(template: &Template) -> String {
             {
                 #(#root_nodes)*
             }
+        }
+
+        fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
+            let mut e = engine.borrow_mut();
+            #(#style_registrations)*
         }
     };
 
@@ -80,27 +115,28 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
         if attr.name == "v-for" { continue; }
         
         match attr.name.as_str() {
-            "width" => {
-                let val: f32 = attr.value.parse().unwrap_or(0.0);
-                builder = quote! { #builder.width(#val) };
+            "class" => {
+                let val = &attr.value;
+                builder = quote! { #builder.class(#val) };
             }
-            "height" => {
-                let val: f32 = attr.value.parse().unwrap_or(0.0);
-                builder = quote! { #builder.height(#val) };
-            }
-            "color" => {
-                let colors: Vec<f32> = attr.value.split(',').map(|s| s.trim().parse().unwrap_or(0.0)).collect();
-                if colors.len() == 4 {
-                    let (r, g, b, a) = (colors[0], colors[1], colors[2], colors[3]);
-                    builder = quote! { #builder.color(#r, #g, #b, #a) };
+            "style" => {
+                // In a perfect world, we'd parse the inline style too. 
+                // For now, let's just emit it if it's literally key:value;
+                // Actually, let's try to parse it.
+                let inline_style = format!("temp {{ {} }}", attr.value);
+                if let Ok((_, rules)) = css::parse_css(&inline_style) {
+                    if let Some(rule) = rules.first() {
+                        for (prop, val) in &rule.declarations {
+                            let val_tokens = style_value_to_tokens(val);
+                            builder = quote! { #builder.style(#prop, #val_tokens) };
+                        }
+                    }
                 }
             }
             "image" => {
                 let val = &attr.value;
                 builder = quote! { #builder.image(#val) };
             }
-            "row" => { builder = quote! { #builder.row() }; }
-            "col" => { builder = quote! { #builder.col() }; }
             _ => {
                  if attr.name == "@click" {
                      let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
@@ -108,7 +144,6 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
                  } else if attr.name == "text" || attr.name == ":text" {
                      if attr.is_dynamic || attr.name == ":text" {
                          let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                         // Use create_memo to ensure it's a ReadSignal<String>
                          builder = quote! { #builder.bind_text(create_memo({
                              let val = #expr.clone();
                              move || val.to_reactive_string()
@@ -116,11 +151,6 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
                      } else {
                          let val = &attr.value;
                          builder = quote! { #builder.text(#val) };
-                     }
-                 } else if attr.is_dynamic {
-                     let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                     if attr.name == "flags" {
-                         builder = quote! { #builder.bind_flags(#expr) };
                      }
                  }
             }
@@ -147,6 +177,20 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
     }
 
     builder
+}
+
+fn style_value_to_tokens(val: &StyleValue) -> TokenStream {
+    match val {
+        StyleValue::Px(v) => quote! { crate::StyleValue::Px(#v) },
+        StyleValue::Percent(v) => quote! { crate::StyleValue::Percent(#v) },
+        StyleValue::Em(v) => quote! { crate::StyleValue::Em(#v) },
+        StyleValue::Vh(v) => quote! { crate::StyleValue::Vh(#v) },
+        StyleValue::Vw(v) => quote! { crate::StyleValue::Vw(#v) },
+        StyleValue::Color(r, g, b, a) => quote! { crate::StyleValue::Color(#r, #g, #b, #a) },
+        StyleValue::Ident(s) => quote! { crate::StyleValue::Ident(#s.to_string()) },
+        StyleValue::String(s) => quote! { crate::StyleValue::String(#s.to_string()) },
+        StyleValue::Auto => quote! { crate::StyleValue::Auto },
+    }
 }
 
 fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u32) -> TokenStream {
@@ -200,27 +244,25 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
 
         for attr in &el.attributes {
             match attr.name.as_str() {
-                "width" => {
-                    let val: f32 = attr.value.parse().unwrap_or(0.0);
-                    builder = quote! { #builder.width(#val) };
+                "class" => {
+                    let val = &attr.value;
+                    builder = quote! { #builder.class(#val) };
                 }
-                "height" => {
-                    let val: f32 = attr.value.parse().unwrap_or(0.0);
-                    builder = quote! { #builder.height(#val) };
-                }
-                "color" => {
-                    let colors: Vec<f32> = attr.value.split(',').map(|s| s.trim().parse().unwrap_or(0.0)).collect();
-                    if colors.len() == 4 {
-                        let (r, g, b, a) = (colors[0], colors[1], colors[2], colors[3]);
-                        builder = quote! { #builder.color(#r, #g, #b, #a) };
+                "style" => {
+                    let inline_style = format!("temp {{ {} }}", attr.value);
+                    if let Ok((_, rules)) = css::parse_css(&inline_style) {
+                        if let Some(rule) = rules.first() {
+                            for (prop, val) in &rule.declarations {
+                                let val_tokens = style_value_to_tokens(val);
+                                builder = quote! { #builder.style(#prop, #val_tokens) };
+                            }
+                        }
                     }
                 }
                 "image" => {
                     let val = &attr.value;
                     builder = quote! { #builder.image(#val) };
                 }
-                "row" => { builder = quote! { #builder.row() }; }
-                "col" => { builder = quote! { #builder.col() }; }
                 _ => {
                      if attr.name == "@click" {
                          let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
@@ -235,11 +277,6 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                          } else {
                              let val = &attr.value;
                              builder = quote! { #builder.text(#val) };
-                         }
-                     } else if attr.is_dynamic {
-                         let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                         if attr.name == "flags" {
-                             builder = quote! { #builder.bind_flags(#expr) };
                          }
                      }
                 }

@@ -21,80 +21,81 @@ impl NodeUpdater {
 // --- Builder Pattern for Elements ---
 
 pub struct Element {
-    min_width: f32,
-    fixed_width: f32,
-    fixed_height: f32,
-    color: Option<(f32, f32, f32, f32)>,
-    text: Option<String>,
+    text_content: Option<String>,
     image_id: Option<String>,
-    flex_direction: Option<u32>,
-    abs_pos: Option<(f32, f32)>,
-    z_index: Option<f32>,
     flags: u32,
 
     text_signal: Option<ReadSignal<String>>,
     flags_signal: Option<ReadSignal<u32>>,
     
     on_click: Option<Rc<dyn Fn()>>,
+    classes: Vec<String>,
+    inline_styles: HashMap<String, crate::StyleValue>,
     children: Vec<Element>,
 }
 
 impl Element {
     pub fn new() -> Self {
         Self {
-            min_width: 0.0,
-            fixed_width: -1.0,
-            fixed_height: -1.0,
-            color: None,
-            text: None,
+            text_content: None,
             image_id: None,
-            flex_direction: None,
-            abs_pos: None,
-            z_index: None,
             flags: 1, // Visible
             text_signal: None,
             flags_signal: None,
             on_click: None,
+            classes: Vec::new(),
+            inline_styles: HashMap::new(),
             children: Vec::new(),
         }
     }
 
-    pub fn width(mut self, w: f32) -> Self { self.fixed_width = w; self }
-    pub fn height(mut self, h: f32) -> Self { self.fixed_height = h; self }
-    pub fn min_width(mut self, mw: f32) -> Self { self.min_width = mw; self }
-    pub fn flags(mut self, f: u32) -> Self { self.flags = f; self }
-    pub fn color(mut self, r: f32, g: f32, b: f32, a: f32) -> Self { self.color = Some((r, g, b, a)); self }
-    pub fn text(mut self, s: &str) -> Self { self.text = Some(s.to_string()); self }
-    pub fn image(mut self, id: &str) -> Self { self.image_id = Some(id.to_string()); self }
-    pub fn row(mut self) -> Self { self.flex_direction = Some(0); self }
-    pub fn col(mut self) -> Self { self.flex_direction = Some(1); self }
-    pub fn absolute(mut self, top: f32, left: f32) -> Self { self.abs_pos = Some((top, left)); self }
-    pub fn z(mut self, z: f32) -> Self { self.z_index = Some(z); self }
+    pub fn class(mut self, name: &str) -> Self {
+        self.classes.push(name.to_string());
+        self
+    }
+
+    pub fn style(mut self, prop: &str, val: crate::StyleValue) -> Self {
+        self.inline_styles.insert(prop.to_string(), val);
+        self
+    }
+
+    // Deprecated helpers - will be removed or made to use .style()
+    pub fn width(self, w: f32) -> Self { self.style("width", crate::StyleValue::Px(w)) }
+    pub fn height(self, h: f32) -> Self { self.style("height", crate::StyleValue::Px(h)) }
+    pub fn color(self, r: f32, g: f32, b: f32, a: f32) -> Self { self.style("color", crate::StyleValue::Color(r, g, b, a)) }
+    pub fn row(self) -> Self { self.style("flex-direction", crate::StyleValue::Ident("row".into())) }
+    pub fn col(self) -> Self { self.style("flex-direction", crate::StyleValue::Ident("column".into())) }
+    pub fn absolute(self, top: f32, left: f32) -> Self { 
+        self.style("position", crate::StyleValue::Ident("absolute".into()))
+            .style("top", crate::StyleValue::Px(top))
+            .style("left", crate::StyleValue::Px(left))
+    }
+    pub fn z(self, z: f32) -> Self { self.style("z-index", crate::StyleValue::Px(z)) }
     pub fn child(mut self, child: Element) -> Self { self.children.push(child); self }
     pub fn on_click<F: Fn() + 'static>(mut self, f: F) -> Self { self.on_click = Some(Rc::new(f)); self }
 
     pub fn bind_text(mut self, signal: ReadSignal<String>) -> Self { self.text_signal = Some(signal); self }
     pub fn bind_flags(mut self, signal: ReadSignal<u32>) -> Self { self.flags_signal = Some(signal); self }
 
+    pub fn text(mut self, s: &str) -> Self { self.text_content = Some(s.to_string()); self }
+    pub fn image(mut self, id: &str) -> Self { self.image_id = Some(id.to_string()); self }
+
     pub fn build(self, engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>) -> u32 {
         self.build_after(engine, parent, None)
     }
 
     pub fn build_after(self, engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, after: Option<u32>) -> u32 {
-        let node_id = engine.borrow_mut().add_node(self.min_width);
+        let node_id = engine.borrow_mut().add_node(0.0);
         
         {
             let mut e = engine.borrow_mut();
-            e.set_fixed_width(node_id, self.fixed_width);
-            e.set_fixed_height(node_id, self.fixed_height);
-            e.set_flags(node_id, self.flags);
-            if let Some((r,g,b,a)) = self.color { e.set_color(node_id, r, g, b, a); }
-            if let Some(s) = self.text { e.set_text(node_id, &s); }
-            if let Some(id) = self.image_id { e.set_image_asset_id(node_id, &id); }
-            if let Some(dir) = self.flex_direction { e.set_flex_direction(node_id, dir); }
-            if let Some((t, l)) = self.abs_pos { e.set_position_absolute(node_id, t, l); }
-            if let Some(z) = self.z_index { e.set_z_index(node_id, z); }
-            if let Some(f) = self.on_click { e.set_on_click(node_id, f); }
+            let node = &mut e.cpu_nodes[node_id as usize];
+            node.classes = self.classes;
+            node.inline_styles = self.inline_styles;
+            node.flags = self.flags;
+            if let Some(s) = self.text_content { node.text = Some(s); }
+            if let Some(id) = self.image_id { node.image_asset_id = Some(id); }
+            if let Some(f) = self.on_click { node.on_click = Some(f); }
             
             if let Some(p) = parent {
                 if let Some(a) = after {
