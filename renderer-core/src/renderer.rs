@@ -3,7 +3,7 @@ use wasm_bindgen::JsCast;
 use crate::web_bindings::{
     GpuDevice, GpuCanvasContext, GpuBuffer, GpuBufferDescriptor,
     GpuBindGroup, GpuBindGroupDescriptor, GpuBindGroupEntry,
-    GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry,
+    GpuBindGroupLayout, GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry,
     GpuComputePipeline, GpuRenderPipeline,
     GpuPipelineLayoutDescriptor, GpuShaderModuleDescriptor,
     GpuBufferBindingLayout, GpuBufferBindingType,
@@ -54,6 +54,10 @@ pub struct FlexRenderer {
     // BindGroups
     bind_group_compute: Option<GpuBindGroup>,
     bind_group_render: Option<GpuBindGroup>,
+    
+    // Layouts (Persisted for re-binding)
+    bind_group_layout_compute: Option<GpuBindGroupLayout>,
+    bind_group_layout_render: Option<GpuBindGroupLayout>,
 }
 
 #[wasm_bindgen]
@@ -82,6 +86,8 @@ impl FlexRenderer {
             pipeline_render_text: None,
             bind_group_compute: None,
             bind_group_render: None,
+            bind_group_layout_compute: None,
+            bind_group_layout_render: None,
         }
     }
 
@@ -188,23 +194,25 @@ impl FlexRenderer {
              layout_entry
         };
 
-        let bind_group_layout_compute = self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of4(
+
+
+        self.bind_group_layout_compute = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of4(
             &make_layout_entry(0, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
             &make_layout_entry(1, GpuShaderStage::COMPUTE, GpuBufferBindingType::Uniform),
             &make_layout_entry(2, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
             &make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage),
-        )));
+        ))));
 
-        let bind_group_layout_render = self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of5(
+        self.bind_group_layout_render = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of5(
             &make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage), // Vertex
             &make_layout_entry(1, GpuShaderStage::VERTEX, GpuBufferBindingType::Uniform), // Vertex
             &make_layout_entry(2, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage), // Vertex
             &make_layout_entry(3, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage), // Fragment
             &make_layout_entry(4, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage), // Fragment
-        )));
+        ))));
 
-        let layout_compute = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(&bind_group_layout_compute)));
-        let layout_render = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(&bind_group_layout_render)));
+        let layout_compute = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(self.bind_group_layout_compute.as_ref().unwrap())));
+        let layout_render = self.device.create_pipeline_layout(&GpuPipelineLayoutDescriptor::new(&js_sys::Array::of1(self.bind_group_layout_render.as_ref().unwrap())));
 
         // Create Pipelines
         // Note: GpuComputePipelineDescriptor::new might not exist explicitly if web-sys generated just dictionary
@@ -295,7 +303,7 @@ impl FlexRenderer {
                 &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
                 &GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())),
             ),
-            &bind_group_layout_compute,
+            self.bind_group_layout_compute.as_ref().unwrap(),
         )));
 
         self.bind_group_render = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
@@ -306,7 +314,7 @@ impl FlexRenderer {
                 &GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())),
                 &GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())),
             ),
-            &bind_group_layout_render,
+            self.bind_group_layout_render.as_ref().unwrap(),
         )));
 
         log("Rust Renderer Init Complete");
@@ -314,7 +322,11 @@ impl FlexRenderer {
     }
 
     pub fn render(&mut self) {
-        log("Render Start");
+        if !self.engine.is_dirty() {
+            return;
+        }
+        // log("Render Start (Dirty)");
+
         if self.nodes_buffer.is_none() { 
             log("Render: skipping, no buffers");
             return; 
@@ -351,6 +363,59 @@ impl FlexRenderer {
             &nodes_vec
         );
 
+        // Update Characters (New)
+        let char_count = self.engine.get_character_count() as u32;
+        let char_size = self.engine.get_character_size() as u32;
+        let chars_byte_length = char_count * char_size;
+        
+        // Simple heuristic: Recreate if count > 0 (always for now if text present)
+        // Optimization: Track capacity. For now, correctness first.
+        if char_count > 0 {
+             let chars_data = self.engine.get_characters_buffer();
+             let chars_vec = chars_data.to_vec();
+             
+             // Create NEW buffer
+             // We can destroy the old one if we want, or let GC handle it (Drop).
+             // self.characters_buffer.take().unwrap().destroy(); // Explicit destroy if needed
+             
+             let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+                 (if chars_byte_length == 0 { 4 } else { chars_byte_length }) as f64,
+                 0x0080 | 0x0008 | 0x0004 // STORAGE | COPY_DST | COPY_SRC
+             ));
+             
+             self.device.queue().write_buffer_with_f64_and_u8_array(&new_buf, 0.0, &chars_vec);
+             self.characters_buffer = Some(new_buf);
+             
+             // RE-BIND GROUPS
+             // This is expensive but necessary since we changed the buffer reference.
+             let make_buffer_binding = |buffer: &GpuBuffer| -> Object {
+                 let obj = Object::new();
+                 Reflect::set(&obj, &"buffer".into(), buffer).unwrap();
+                 obj
+             };
+             
+             self.bind_group_compute = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
+                &js_sys::Array::of4(
+                    &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())),
+                ),
+                self.bind_group_layout_compute.as_ref().unwrap(),
+            )));
+    
+            self.bind_group_render = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
+                &js_sys::Array::of5(
+                    &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(3, &make_buffer_binding(self.curve_buffer.as_ref().unwrap())),
+                    &GpuBindGroupEntry::new(4, &make_buffer_binding(self.glyph_info_buffer.as_ref().unwrap())),
+                ),
+                self.bind_group_layout_render.as_ref().unwrap(),
+            )));
+        }
+
         let command_encoder = self.device.create_command_encoder(); 
 
         let node_count = self.engine.get_node_count() as u32;
@@ -364,7 +429,7 @@ impl FlexRenderer {
         };
 
         // Pass 1: Width Bottom-Up
-        log("Render: Pass 1");
+        // log("Render: Pass 1");
         {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_bottom_up.is_none() { log("Pipeline bottom_up is None!"); }
@@ -375,7 +440,7 @@ impl FlexRenderer {
         }
 
         // Pass Reset
-        log("Render: Pass 1 Reset");
+        // log("Render: Pass 1 Reset");
         {
             let pass = command_encoder.begin_compute_pass();
              if self.pipeline_reset_signals.is_none() { log("Pipeline reset is None!"); }
@@ -386,7 +451,7 @@ impl FlexRenderer {
         }
 
         // Pass 2: Width Top-Down (8 iterations)
-        log("Render: Pass 2");
+        // log("Render: Pass 2");
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
              if self.pipeline_top_down.is_none() { log("Pipeline top_down is None!"); }
@@ -397,7 +462,7 @@ impl FlexRenderer {
         }
 
         // Pass Reset
-        log("Render: Pass 2 Reset");
+        // log("Render: Pass 2 Reset");
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
@@ -407,7 +472,7 @@ impl FlexRenderer {
         }
 
          // Pass 3: Height Bottom-Up
-         log("Render: Pass 3");
+         // log("Render: Pass 3");
         {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_height_bottom_up.is_none() { log("Pipeline height_bottom_up is None!"); }
@@ -418,7 +483,7 @@ impl FlexRenderer {
         }
         
         // Pass Reset
-        log("Render: Pass 3 Reset");
+        // log("Render: Pass 3 Reset");
         {
              let pass = command_encoder.begin_compute_pass();
              pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
@@ -428,7 +493,7 @@ impl FlexRenderer {
         }
 
          // Pass 4: Final Layout (8 iterations)
-         log("Render: Pass 4");
+         // log("Render: Pass 4");
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
             if self.pipeline_final_layout.is_none() { log("Pipeline final_layout is None!"); }
@@ -439,7 +504,7 @@ impl FlexRenderer {
         }
 
         // Render Pass
-        log("Render: Render Pass Setup");
+        // log("Render: Render Pass Setup");
         let texture_view = self.context.get_current_texture().create_view();
         
         // Depth Texture Management
@@ -460,7 +525,7 @@ impl FlexRenderer {
             self.depth_texture = Some(self.device.create_texture(&depth_desc));
             self.depth_texture_width = canvas_width;
             self.depth_texture_height = canvas_height;
-            log(&format!("Created Depth Texture: {}x{}", canvas_width, canvas_height));
+            // log(&format!("Created Depth Texture: {}x{}", canvas_width, canvas_height));
         }
         
         let depth_view = self.depth_texture.as_ref().unwrap().create_view();
@@ -484,44 +549,47 @@ impl FlexRenderer {
         
         Reflect::set(&color_attachment_obj, &"clearValue".into(), &clear_val).unwrap();
 
-        log("Render: Pass Descriptor");
+        // log("Render: Pass Descriptor");
         // Cast object to GpuRenderPassColorAttachment for type safety in array (unchecked is fine)
         let render_pass_desc = GpuRenderPassDescriptor::new(&js_sys::Array::of1(&color_attachment_obj));
         
         // Attach Depth Stencil
         Reflect::set(&render_pass_desc, &"depthStencilAttachment".into(), &depth_attachment_obj).unwrap();
         
-        log("Render: Begin Pass");
+        // log("Render: Begin Pass");
         let render_pass = command_encoder.begin_render_pass(&render_pass_desc);
         
-        log("Render: Set Pipeline");
+        // log("Render: Set Pipeline");
         if self.pipeline_render.is_none() { log("CRITICAL: pipeline_render is None"); }
         render_pass.set_pipeline_render(self.pipeline_render.as_ref().unwrap());
 
-        log("Render: Set Bind Group");
+        // log("Render: Set Bind Group");
         if self.bind_group_render.is_none() { log("CRITICAL: bind_group_render is None"); }
         render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
         
-        log("Render: Draw");
+        // log("Render: Draw");
         render_pass.draw_with_instance_count(6, node_count, 0, 0);
 
         // Draw Text
         let char_count = self.engine.get_character_count() as u32;
         if char_count > 0 {
-            log("Render: Draw Text");
+            // log("Render: Draw Text");
             if self.pipeline_render_text.is_none() { log("CRITICAL: pipeline_render_text is None"); }
             render_pass.set_pipeline_render(self.pipeline_render_text.as_ref().unwrap());
             render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
             render_pass.draw_with_instance_count(6, char_count, 0, 0);
         }
 
-        log("Render: End Pass");
+        // log("Render: End Pass");
         let end_render = |pass: &GpuRenderPassEncoder| {
              pass.end_render();
         };
         end_render(&render_pass);
 
+        
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
+        
+        self.engine.mark_clean();
     }
 
     pub fn debug(&self) -> Promise {

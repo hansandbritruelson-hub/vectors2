@@ -26,7 +26,7 @@ struct Node {
     signals_finished: atomic<u32>,
     text_start: u32,
     text_length: u32,
-    _pad0: u32,
+    flags: u32, // Bit 0 = Visible
     _pad1: u32,
 };
 
@@ -159,6 +159,12 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 fn process_node_width(id: u32) {
     let count = nodes[id].child_count;
     
+    // Visibility Check
+    if ((nodes[id].flags & 1u) == 0u) {
+        nodes[id].desired_width = 0.0;
+        return;
+    }
+    
     if (nodes[id].fixed_width >= 0.0) {
         nodes[id].desired_width = nodes[id].fixed_width;
         return;
@@ -175,14 +181,14 @@ fn process_node_width(id: u32) {
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
                 // POS ABSOLUTE CHECK
-                if (nodes[start + i].position_mode == 0u) {
+                if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
                     result_width = max(result_width, nodes[start + i].desired_width);
                 }
             }
         } else { // Row (Default)
             for (var i = 0u; i < count; i = i + 1u) {
                  // POS ABSOLUTE CHECK
-                if (nodes[start + i].position_mode == 0u) {
+                if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
                     result_width += nodes[start + i].desired_width;
                 }
             }
@@ -276,6 +282,12 @@ fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 
 fn process_node_height(id: u32) {
+    // Visibility Check
+    if ((nodes[id].flags & 1u) == 0u) {
+        nodes[id].desired_height = 0.0;
+        return;
+    }
+
     let count = nodes[id].child_count;
     if (count == 0u) {
         let result = layout_text(id, nodes[id].final_width, true);
@@ -286,13 +298,13 @@ fn process_node_height(id: u32) {
         
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
-                 if (nodes[start + i].position_mode == 0u) {
+                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
                     result_height += nodes[start + i].desired_height;
                  }
             }
         } else { // Row
             for (var i = 0u; i < count; i = i + 1u) {
-                if (nodes[start + i].position_mode == 0u) {
+                if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
                     result_height = max(result_height, nodes[start + i].desired_height);
                 }
             }
@@ -332,7 +344,7 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     
                     // Sum previous siblings only if they are relative
                     for (var i = start; i < id; i = i + 1u) {
-                        if (nodes[i].position_mode == 0u) {
+                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
                             y_cursor += nodes[i].desired_height;
                         }
                     }
@@ -346,7 +358,7 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     
                      // Sum previous siblings only if they are relative
                     for (var i = start; i < id; i = i + 1u) {
-                        if (nodes[i].position_mode == 0u) {
+                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
                             x_cursor += nodes[i].final_width;
                         }
                     }

@@ -6,10 +6,16 @@ use tiny_skia::{Pixmap, Transform};
 pub mod renderer;
 pub mod ui;
 pub mod web_bindings;
+pub mod signals;
+#[cfg(test)]
+mod tests;
 pub use renderer::FlexRenderer;
 
 pub fn log(s: &str) {
+    #[cfg(target_arch = "wasm32")]
     web_bindings::log(s);
+    #[cfg(not(target_arch = "wasm32"))]
+    println!("{}", s);
 }
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
@@ -231,7 +237,7 @@ pub struct Node {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub _pad0: u32,
+    pub flags: u32,       // Bit 0 = Visible
     pub _pad1: u32,
 }
 
@@ -261,7 +267,7 @@ impl Node {
             signals_finished: 0,
             text_start: 0,
             text_length: 0,
-            _pad0: 0,
+            flags: 1, // Default to 1 (Visible)
             _pad1: 0,
         }
     }
@@ -314,6 +320,8 @@ pub struct FlexEngine {
     
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
+
+    pub dirty: bool,
 }
 
 #[wasm_bindgen]
@@ -333,6 +341,7 @@ impl FlexEngine {
             descender: 0.0,
             line_gap: 0.0,
             face: None,
+            dirty: true,
         };
         
         engine.parse_font();
@@ -578,7 +587,39 @@ impl FlexEngine {
     }
 
     
-    // Kerning getters omitted for brevity but similar pattern if needed
+    pub fn update_node_flags(&mut self, node_id: u32, flags: u32) {
+        if (node_id as usize) < self.nodes.len() {
+             self.nodes[node_id as usize].flags = flags;
+             self.mark_dirty();
+        }
+    }
+    
+     pub fn update_node_color(&mut self, node_id: u32, r: f32, g: f32, b: f32, a: f32) {
+              let node = &mut self.nodes[node_id as usize];
+              node.color_r = r;
+              node.color_g = g;
+              node.color_b = b;
+              node.color_a = a;
+              self.mark_dirty();
+          }
+    
+    // Kerning getters omitted
+    
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+    
+    pub fn mark_dirty(&mut self) {
+        if !self.dirty {
+            self.dirty = true;
+            #[cfg(target_arch = "wasm32")]
+            web_bindings::request_render_frame();
+        }
+    }
+    
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
 }
 
 #[wasm_bindgen]

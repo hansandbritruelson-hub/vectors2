@@ -16,6 +16,13 @@ extern "C" {
     #[wasm_bindgen(method, getter, js_name = devicePixelRatio)]
     pub fn device_pixel_ratio(this: &Window) -> f64;
 
+    #[wasm_bindgen(method, js_name = setInterval)]
+    pub fn set_interval(this: &Window, callback: &JsValue, timeout: i32) -> JsValue;
+
+    // Call back to JS to request a frame
+    #[wasm_bindgen(js_namespace = window, js_name = requestRenderFrame)]
+    pub fn request_render_frame();
+
     pub type HtmlCanvasElement;
     #[wasm_bindgen(method, getter)]
     pub fn width(this: &HtmlCanvasElement) -> u32;

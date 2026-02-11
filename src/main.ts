@@ -43,17 +43,29 @@ const init = async () => {
     const renderer = new FlexRenderer(device, context);
     await renderer.init();
 
-    let frameCount = 0;
-    // Game Loop
-    const frame = () => {
+    // Push-based Render Loop
+    let pendingFrame = false;
+    const renderFrame = () => {
+        pendingFrame = false;
         renderer.render();
-        frameCount++;
-        if (frameCount === 60) {
-            renderer.debug();
-        }
-        requestAnimationFrame(frame);
     };
-    requestAnimationFrame(frame);
+
+    (window as any).requestRenderFrame = () => {
+        if (!pendingFrame) {
+            pendingFrame = true;
+            requestAnimationFrame(renderFrame);
+        }
+    };
+
+    // Initial render
+    renderer.render();
+
+    // Expose debug for manual inspection
+    (window as any).debugRenderer = () => {
+        renderer.debug();
+    };
+
+    console.log("Renderer initialized. Periodic updates enabled for testing.");
 };
 
 init();

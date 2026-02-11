@@ -26,7 +26,7 @@ struct Node {
     signals_finished: u32,
     text_start: u32,
     text_length: u32,
-    _pad0: u32,
+    flags: u32, // Bit 0 = Visible
     _pad1: u32,
 };
 
@@ -79,6 +79,14 @@ struct VertexOutput {
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VertexOutput {
     let node = nodes[instance_index];
+    
+    // Visibility Check
+    if ((node.flags & 1u) == 0u) {
+        var out: VertexOutput;
+        out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0); // Degenerate
+        return out;
+    }
+
     var pos = vec2<f32>(0.0, 0.0);
     let x1 = node.final_x;
     let y1 = node.final_y;
@@ -115,6 +123,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VertexOutput {
     let char = characters[instance_index];
     let node = nodes[char.node_index];
+    
+    // Visibility Check
+    if ((node.flags & 1u) == 0u) {
+        var out: VertexOutput;
+        out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0); // Degenerate
+        return out;
+    }
+
     let base_x = node.final_x + char.x;
     let base_y = node.final_y + char.y;
     let w = char.width;
