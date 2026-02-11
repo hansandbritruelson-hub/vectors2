@@ -243,16 +243,27 @@ pub fn build_ui(engine: Rc<RefCell<FlexEngine>>) {
             div().width(75.0).color(0.2, 0.2, 0.25, 1.0)
             .bind_text(sidebar_content)
             .child(
-                 div().width(64.0).height(64.0).flags(3) // Visible (1) | Image (2) = 3
+                 // Paintbrush Icon
+                 div().width(64.0).height(64.0).flags(3) 
+            )
+            .child(
+                 // Pencil Icon
+                 div().width(64.0).height(64.0).flags(3) 
             )
         )
         .build(engine.clone(), None);
     
-    // Trigger Image Download
+    // Trigger Image Download / Asset Load
     {
         let engine_clone = engine.clone();
         spawn_local(async move {
-            crate::load_image_to_engine(engine_clone, "test.png".to_string()).await;
+            // Existing test image (commented out to show assets)
+            // crate::load_image_to_engine(engine_clone.clone(), "test.png".to_string()).await;
+            
+            // Load Asset
+            // Note: Current engine only supports ONE global texture. 
+            // The last loaded image will be applied to ALL nodes with flags(3).
+            crate::load_image_to_engine(engine_clone, "asset:paintbrush.svg".to_string()).await;
         });
     }
 

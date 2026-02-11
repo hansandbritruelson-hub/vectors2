@@ -22,6 +22,9 @@ pub fn log(s: &str) {
     println!("{}", s);
 }
 
+// Include generated assets
+include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
+
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
 
 #[repr(C)]
@@ -1025,15 +1028,80 @@ pub fn render_svg(_svg_content: &str, width: u32, height: u32) -> Vec<u8> {
     */
 }
 
+
 pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEngine>>, url: String) {
-    // log(&format!("Downloading image: {}", url));
-    let promise = crate::web_bindings::download_image(&url);
-    let js_val = wasm_bindgen_futures::JsFuture::from(promise).await;
-    
-    if let Ok(val) = js_val {
-        let uint8_array = js_sys::Uint8Array::new(&val);
-        let bytes = uint8_array.to_vec();
+    let bytes: Vec<u8>;
+
+    if url.starts_with("asset:") {
+        let path = url.trim_start_matches("asset:");
+        // Remove strictly one leading slash if present, to match build.rs keys (which are filenames)
+        // But user might say "asset:paintbrush.svg" or "asset:/paintbrush.svg"
+        let clean_path = path.trim_start_matches('/');
         
+        if let Some(asset_bytes) = get_asset(clean_path) {
+            log(&format!("Asset found: {}", clean_path));
+            bytes = asset_bytes.to_vec();
+        } else {
+            log(&format!("Asset NOT found: {}", clean_path));
+            return;
+        }
+    } else {
+        // HTTP Download
+        // log(&format!("Downloading image: {}", url));
+        let promise = crate::web_bindings::download_image(&url);
+        let js_val = wasm_bindgen_futures::JsFuture::from(promise).await;
+        
+        if let Ok(val) = js_val {
+            let uint8_array = js_sys::Uint8Array::new(&val);
+            bytes = uint8_array.to_vec();
+        } else {
+            log("Failed to download image");
+            return;
+        }
+    }
+
+    // Determine if SVG or Image
+    // Simple check: extension or magic bytes. 
+    // Since we control assets, extension is fine. For HTTP, we might need to guess.
+    // Let's check if it looks like SVG (starts with <svg or has .svg extension in URL)
+    
+    let is_svg = url.ends_with(".svg") || (bytes.len() > 4 && &bytes[0..4] == b"<svg");
+
+    if is_svg {
+        log("Decoding SVG...");
+        // Render SVG to RGBA
+        let opt = usvg::Options::default();
+        let tree = match usvg::Tree::from_data(&bytes, &opt) {
+            Ok(t) => t,
+            Err(e) => {
+                log(&format!("Failed to parse SVG: {}", e));
+                return;
+            }
+        };
+
+        // Determine size.
+        let width = tree.size.width().ceil() as u32;
+        let height = tree.size.height().ceil() as u32;
+        
+        // Ensure at least 1x1
+        let width = if width == 0 { 1 } else { width };
+        let height = if height == 0 { 1 } else { height };
+        
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).unwrap();
+        
+        resvg::render(&tree, usvg::FitTo::Original, tiny_skia::Transform::default(), pixmap.as_mut());
+        
+        let data = pixmap.data().to_vec();
+        
+        // Convert BGRA / RGBA. tiny-skia is usually RGBA (premultiplied?).
+        // tiny-skia documentation says: "The pixels are stored in a premultiplied RGBA 8888 format."
+        // Our renderer expects... RGBA?
+        // Let's assume RGBA for now.
+        
+        engine.borrow_mut().set_image_data(width, height, data);
+        
+    } else {
+        // Normal Image
         let img = image::load_from_memory(&bytes);
         match img {
             Ok(dynamic_img) => {
@@ -1049,7 +1117,5 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
                  log(&format!("Failed to decode image: {:?}", e));
             }
         }
-    } else {
-        log("Failed to download image");
     }
 }
