@@ -792,8 +792,7 @@ impl FlexEngine {
                      let chars_vec: Vec<char> = text_content.chars().collect();
                      let chars_len = chars_vec.len() as u32;
                      
-                     log(&format!("--- DEBUG: Node {} text: {:?} ---", gpu_idx, cpu_node.text));
-                     log(&format!("  text_start: {}, text_length: {}", chars_start, chars_len));
+
                      
                      for (i, &c) in chars_vec.iter().enumerate() {
                         let val = c as u32;
@@ -809,11 +808,7 @@ impl FlexEngine {
             
                         self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, gpu_idx));
                         
-                        if let Some(c_ref) = self.characters.last() {
-                            log(&format!("    Char '{}' (idx: {}): glyph={}, advance={}", 
-                                c, chars_start + i as u32, c_ref.glyph_index, 
-                                self.glyph_data[c_ref.glyph_index as usize].advance));
-                        }
+
                      }
                      
                      gpu_node.text_start = chars_start;

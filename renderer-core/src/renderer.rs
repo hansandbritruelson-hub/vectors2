@@ -592,8 +592,7 @@ impl FlexRenderer {
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
         self.engine.borrow_mut().mark_clean();
         
-        // --- AUTOMATIC DEBUG TRIGGER ---
-        let _ = self.debug(); 
+
     }
 
     pub fn debug(&self) -> Promise {
