@@ -381,6 +381,14 @@ impl FlexRenderer {
              pass.end_compute();
         };
 
+        // PASS 1: Width Bottom-Up
+        {
+            let pass = command_encoder.begin_compute_pass();
+            pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
+            dispatch(&pass, workgroups);
+            end_compute(&pass);
+        }
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_bottom_up.as_ref().unwrap());
@@ -389,6 +397,7 @@ impl FlexRenderer {
             end_compute(&pass);
         }
 
+        // PASS 2: Width Top-Down
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
@@ -396,7 +405,6 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_top_down.as_ref().unwrap());
@@ -405,6 +413,7 @@ impl FlexRenderer {
             end_compute(&pass);
         }
 
+        // PASS 3: Height Bottom-Up
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
@@ -412,7 +421,6 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_height_bottom_up.as_ref().unwrap());
@@ -421,6 +429,7 @@ impl FlexRenderer {
             end_compute(&pass);
         }
         
+        // PASS 4: Final Layout (Top-Down)
         {
              let pass = command_encoder.begin_compute_pass();
              pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
@@ -428,7 +437,6 @@ impl FlexRenderer {
              dispatch(&pass, workgroups);
              end_compute(&pass);
         }
-
         for _ in 0..8 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_final_layout.as_ref().unwrap());

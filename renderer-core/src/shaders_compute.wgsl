@@ -26,7 +26,7 @@ struct Node {
     text_start: u32,
     text_length: u32,
     flags: u32, // Bit 0 = Visible
-    unconstrained_content_width: f32,
+    natural_content_width: f32,
 };
 
 struct Character {
@@ -119,7 +119,7 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
     return LayoutResult(max_x, cursor_y + line_height);
 }
 
-// PASS 1: Intrinsic Width (Bottom-Up)
+// PASS 1: Natural Width (Bottom-Up)
 @compute @workgroup_size(64)
 fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let node_id = global_id.x;
@@ -159,7 +159,7 @@ fn get_negotiated_width(id: u32) -> f32 {
     if (nodes[id].fixed_width >= 0.0) {
         return nodes[id].fixed_width;
     }
-    return max(nodes[id].min_width, nodes[id].unconstrained_content_width);
+    return max(nodes[id].min_width, nodes[id].natural_content_width);
 }
 
 fn process_node_width(id: u32) {
@@ -167,14 +167,14 @@ fn process_node_width(id: u32) {
 
     // Visibility Check
     if ((nodes[id].flags & 1u) == 0u) {
-        nodes[id].unconstrained_content_width = 0.0;
+        nodes[id].natural_content_width = 0.0;
         return;
     }
 
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
-        nodes[id].unconstrained_content_width = result.width;
+        nodes[id].natural_content_width = result.width;
     } else {
         var result_width = 0.0;
         let start = nodes[id].child_start_index;
@@ -194,7 +194,7 @@ fn process_node_width(id: u32) {
                 }
             }
         }
-        nodes[id].unconstrained_content_width = result_width;
+        nodes[id].natural_content_width = result_width;
     }
 }
 
@@ -228,12 +228,12 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if (nodes[id].fixed_width >= 0.0) {
                         nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        let parent_unconstrained = nodes[parent_id].unconstrained_content_width;
+                        let parent_natural = nodes[parent_id].natural_content_width;
                         let parent_final = nodes[parent_id].final_width;
                         let my_negotiated = get_negotiated_width(id);
                         
-                        if (parent_unconstrained > 0.0) {
-                            let ratio = parent_final / parent_unconstrained;
+                        if (parent_natural > 0.0) {
+                            let ratio = parent_final / parent_natural;
                             nodes[id].final_width = my_negotiated * ratio;
                         } else {
                             nodes[id].final_width = 0.0;
@@ -246,7 +246,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-// PASS 3: Intrinsic Height (Bottom-Up)
+// PASS 3: Natural Height (Bottom-Up)
 @compute @workgroup_size(64)
 fn height_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let node_id = global_id.x;

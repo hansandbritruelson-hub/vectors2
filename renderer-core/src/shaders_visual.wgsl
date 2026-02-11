@@ -26,7 +26,7 @@ struct Node {
     text_start: u32,
     text_length: u32,
     flags: u32, // Bit 0 = Visible
-    unconstrained_content_width: f32,
+    natural_content_width: f32,
 };
 
 struct Character {

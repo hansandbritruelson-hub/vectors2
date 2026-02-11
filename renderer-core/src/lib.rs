@@ -235,7 +235,7 @@ pub struct GpuNode {
     pub text_start: u32,
     pub text_length: u32,
     pub flags: u32,       // Bit 0 = Visible
-    pub unconstrained_content_width: f32,
+    pub natural_content_width: f32,
 }
 
 impl GpuNode {
@@ -264,7 +264,7 @@ impl GpuNode {
             text_start: 0,
             text_length: 0,
             flags: 1, // Default to 1 (Visible)
-            unconstrained_content_width: 0.0,
+            natural_content_width: 0.0,
         }
     }
 }
