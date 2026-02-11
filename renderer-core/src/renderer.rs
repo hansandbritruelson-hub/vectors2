@@ -457,7 +457,6 @@ impl FlexRenderer {
                      self.atlas_width = needed_width;
                      self.atlas_height = needed_height;
                      rebind_needed = true;
-                     log(&format!("Created Texture Atlas GPU Texture: {}x{}", needed_width, needed_height));
                 }
                 
                 // Upload Pending Regions
@@ -709,28 +708,25 @@ impl FlexRenderer {
             let vec = uint8_array.to_vec();
             staging_buf.unmap();
             staging_buf.destroy(); // Keep this line as it was in the original
-            log(&format!("FlexRenderer: Read back {} bytes from nodes_buffer", vec.len()));
-        
+            
             let node_size = std::mem::size_of::<crate::GpuNode>();
             let count = vec.len() / node_size;
-            log(&format!("FlexRenderer: Decoding {} nodes (node_size: {})", count, node_size));
-
             let mut gpu_nodes = Vec::with_capacity(count);
             for i in 0..count {
                 let offset = i * node_size;
                 let node_ptr = unsafe { vec.as_ptr().add(offset) } as *const crate::GpuNode;
                 let node = unsafe { (*node_ptr).clone() };
-                if i < 5 || (node.flags & 1) != 0 {
-                    // Log the first few or any visible nodes
-                    log(&format!("FlexRenderer: Node {} [flags: {}, pos: {}, {} size: {}x{}]", i, node.flags, node.final_x, node.final_y, node.final_width, node.final_height));
-                }
                 gpu_nodes.push(node);
             }
             
-            {
+            let callbacks = {
                 let mut e = engine.borrow_mut();
                 e.gpu_nodes = gpu_nodes;
-                e.handle_click(x, y);
+                e.handle_click(x, y)
+            };
+            
+            for cb in callbacks {
+                cb();
             }
             
             Ok(JsValue::UNDEFINED)

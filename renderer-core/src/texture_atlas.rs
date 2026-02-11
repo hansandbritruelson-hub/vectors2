@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use wasm_bindgen::prelude::*;
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use guillotiere::{AtlasAllocator, Size, Allocation};

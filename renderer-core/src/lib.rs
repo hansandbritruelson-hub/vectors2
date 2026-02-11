@@ -1,12 +1,6 @@
 use wasm_bindgen::prelude::*;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
-use wasm_bindgen_futures::JsFuture;
-use image::io::Reader as ImageReader;
-use std::io::Cursor;
 use std::collections::HashMap;
-use crate::web_bindings::download_image;
-use tiny_skia::{Pixmap, Transform};
-use usvg::{Options, Tree, FitTo};
 
 pub mod renderer;
 pub mod ui;
@@ -438,6 +432,8 @@ pub struct FlexEngine {
 impl FlexEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> FlexEngine {
+        #[cfg(target_arch = "wasm32")]
+        console_error_panic_hook::set_once();
         log("FlexEngine Initialized via WebAssembly (CpuNode Topology)");
         
         let mut engine = FlexEngine {
@@ -500,7 +496,7 @@ impl FlexEngine {
             });
 
             let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
-            let rect = bbox; // Alias for clarity if needed, or just use bbox
+            let _rect = bbox; // Alias for clarity if needed, or just use bbox
             self.glyph_data.push(GlyphData {
                 advance,
                 bearing_x: bbox.x_min as f32 * scale - 1.0, // 1px padding
@@ -530,62 +526,6 @@ impl FlexEngine {
         index
     }
 
-    pub fn handle_click(&mut self, x: f32, y: f32) {
-        log(&format!("FlexEngine: Handling click at {}, {}", x, y));
-        
-        let mut hit_idx = None;
-        for i in (0..self.gpu_nodes.len()).rev() {
-            let n = &self.gpu_nodes[i];
-            
-            // Skip invisible if flag bit 0 is Not set
-            if (n.flags & 1) == 0 { continue; }
-
-            let left = n.final_x;
-            let top = n.final_y;
-            let right = left + n.final_width;
-            let bottom = top + n.final_height;
-
-            if x >= left && x <= right && y >= top && y <= bottom {
-                log(&format!("FlexEngine: HIT Node {} (CPU Idx: {}) at [{}, {}, {}, {}]", i, n.cpu_index, left, top, right, bottom));
-                hit_idx = Some(i);
-                break;
-            }
-        }
-
-        if let Some(gpu_idx) = hit_idx {
-            let initial_cpu_idx = self.gpu_nodes[gpu_idx].cpu_index as usize;
-            
-            // Log target node info
-            if let Some(node) = self.cpu_nodes.get(initial_cpu_idx) {
-                let text_label = node.text.as_deref().unwrap_or("None");
-                log(&format!("FlexEngine: Target Node {} (CPU Idx: {}), Text: {:?}", gpu_idx, initial_cpu_idx, text_label));
-            }
-
-            // Event Bubbling
-            let mut current_cpu_idx = Some(initial_cpu_idx);
-            let mut handled = false;
-
-            while let Some(cpu_idx) = current_cpu_idx {
-                if let Some(node) = self.cpu_nodes.get(cpu_idx) {
-                    if let Some(cb) = &node.on_click {
-                        log(&format!("FlexEngine: Executing on_click callback at CPU Node {}", cpu_idx));
-                        cb();
-                        handled = true;
-                        break;
-                    }
-                    current_cpu_idx = node.parent;
-                } else {
-                    break;
-                }
-            }
-
-            if !handled {
-                log("FlexEngine: HIT but NO callback found in parent chain");
-            }
-        } else {
-            log("FlexEngine: NO node hit at these coordinates");
-        }
-    }
 
     // --- Topology Management (Linked List Wiring) ---
 
@@ -1250,7 +1190,6 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
     };
     
     engine.borrow_mut().add_asset(id, bytes);
-    log(&format!("Asset loaded: {}", url));
 }
 
 #[wasm_bindgen]
@@ -1262,6 +1201,49 @@ impl FlexEngine {
 
 // --- Internal Methods (Not exposed to JS) ---
 impl FlexEngine {
+    pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<std::rc::Rc<dyn Fn()>> {
+        let mut hit_idx = None;
+        for i in (0..self.gpu_nodes.len()).rev() {
+            let n = &self.gpu_nodes[i];
+            
+            // Skip invisible if flag bit 0 is Not set
+            if (n.flags & 1) == 0 { continue; }
+
+            let left = n.final_x;
+            let top = n.final_y;
+            let right = left + n.final_width;
+            let bottom = top + n.final_height;
+
+            if x >= left && x <= right && y >= top && y <= bottom {
+                hit_idx = Some(i);
+                break;
+            }
+        }
+
+        let mut callbacks = Vec::new();
+
+        if let Some(gpu_idx) = hit_idx {
+            let initial_cpu_idx = self.gpu_nodes[gpu_idx].cpu_index as usize;
+            
+            // Event Bubbling
+            let mut current_cpu_idx = Some(initial_cpu_idx);
+
+            while let Some(cpu_idx) = current_cpu_idx {
+                if let Some(node) = self.cpu_nodes.get(cpu_idx) {
+                    if let Some(cb) = &node.on_click {
+                        callbacks.push(cb.clone());
+                        break;
+                    }
+                    current_cpu_idx = node.parent;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        callbacks
+    }
+
     pub fn add_image_to_atlas(&mut self, id: String, width: u32, height: u32, data: Vec<u8>) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {
         let key = texture_atlas::CacheKey { id, width, height };
         let handle = self.texture_atlas.allocate(key, data);
@@ -1275,7 +1257,7 @@ impl FlexEngine {
         self.assets.get(id).cloned()
     }
 
-    pub fn assign_image_to_node(&mut self, node_id: u32, region: texture_atlas::AtlasRegion) {
+    pub fn assign_image_to_node(&mut self, node_id: u32, _region: texture_atlas::AtlasRegion) {
         let idx = node_id as usize;
         if idx < self.cpu_nodes.len() {
            // We need to store this in CPU node?

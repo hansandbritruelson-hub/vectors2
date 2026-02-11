@@ -63,9 +63,8 @@ const init = async () => {
 
     canvas.addEventListener('mousedown', async (e) => {
         const rect = canvas.getBoundingClientRect();
-        const cur_dpr = window.devicePixelRatio || 1;
-        const x = (e.clientX - rect.left) * cur_dpr;
-        const y = (e.clientY - rect.top) * cur_dpr;
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
 
         console.log(`Click at (UI pixels): ${x}, ${y}`);
         await renderer.handle_click(x, y);
