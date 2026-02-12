@@ -21,7 +21,7 @@ pub fn create_app_renderer(device: renderer_core::web_bindings::GpuDevice, conte
     let engine = Rc::new(RefCell::new(FlexEngine::new()));
 
     // Build the UI
-    generated_ui::app::build_generated_ui(engine.clone());
+    generated_ui::app::build(engine.clone(), None, generated_ui::app::Props {});
     
     // Return the renderer, using the shared engine Rc
     FlexRenderer::new_with_ref(device, context, engine)

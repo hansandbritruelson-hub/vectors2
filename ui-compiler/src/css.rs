@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+#![allow(dead_code)]
 use nom::{
     bytes::complete::{tag, take_until, is_not, take_while1},
     character::complete::{multispace0, multispace1, alphanumeric1, hex_digit1},

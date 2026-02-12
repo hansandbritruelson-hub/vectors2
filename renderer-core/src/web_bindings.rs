@@ -1,3 +1,6 @@
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(dead_code)]
 use wasm_bindgen::prelude::*;
 use js_sys::{Object, Reflect, Promise};
 

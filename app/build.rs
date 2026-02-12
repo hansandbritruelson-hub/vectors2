@@ -74,5 +74,18 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed={}", template_path.display());
+    // Watch all .vue files in templates dir
+    let templates_dir = root_dir.join("templates");
+    if let Ok(entries) = fs::read_dir(templates_dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext == "vue" {
+                        println!("cargo:rerun-if-changed={}", path.display());
+                    }
+                }
+            }
+        }
+    }
 }

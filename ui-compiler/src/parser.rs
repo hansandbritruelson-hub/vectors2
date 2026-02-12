@@ -29,10 +29,17 @@ pub struct Attribute {
 }
 
 #[derive(Debug, Clone)]
+pub struct Import {
+    pub module_name: String, // e.g. "Header" or "utils"
+    pub is_component: bool,  // true if PascalCase
+}
+
+#[derive(Debug, Clone)]
 pub struct Template {
     pub root: Vec<Node>,
     pub styles: Vec<String>,
     pub script: Option<String>,
+    pub imports: Vec<Import>,
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -140,6 +147,7 @@ pub fn parse_template(input: &str) -> IResult<&str, Template> {
         root: vec![],
         styles: vec![],
         script: None,
+        imports: vec![],
     };
 
     let mut remaining = input;
@@ -154,7 +162,9 @@ pub fn parse_template(input: &str) -> IResult<&str, Template> {
             let (next, _) = tag(">")(next)?;
             let (next, content) = take_until("</script>")(next)?;
             let (next, _) = tag("</script>")(next)?;
-            template.script = Some(content.to_string());
+            let (cleaned_script, imports) = extract_imports(content);
+            template.script = Some(cleaned_script);
+            template.imports = imports;
             remaining = next;
         } else if next_raw.starts_with("<style") {
             let (next, _) = tag("<style")(next_raw)?;
@@ -183,4 +193,49 @@ pub fn parse_template(input: &str) -> IResult<&str, Template> {
     }
     
     Ok((remaining, template))
+}
+
+fn extract_imports(script: &str) -> (String, Vec<Import>) {
+    // User requested "AST not regex".
+    // Since the script block content is injected into a function, it may contain statements (let x = 1;)
+    // and items (mod Header;). syn::parse_file only accepts items.
+    // So we wrap it in braces to parse as a Block.
+    
+    let wrapped_script = format!("{{ {} }}", script);
+    let block = match syn::parse_str::<syn::Block>(&wrapped_script) {
+        Ok(b) => b,
+        Err(e) => {
+             eprintln!("Warning: Failed to parse script block with syn: {}", e);
+             return (script.to_string(), vec![]);
+        }
+    };
+
+    let mut imports = Vec::new();
+    let mut new_stmts = Vec::new();
+
+    for stmt in block.stmts {
+        let mut is_component_mod = false;
+        if let syn::Stmt::Item(syn::Item::Mod(ref item_mod)) = stmt {
+             let mod_name = item_mod.ident.to_string();
+             if mod_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                 imports.push(Import {
+                     module_name: mod_name,
+                     is_component: true,
+                 });
+                 is_component_mod = true;
+             }
+        }
+
+        if !is_component_mod {
+            new_stmts.push(stmt);
+        }
+    }
+
+    // Regenerate script content
+    // We quote the statements.
+    let new_block_content = quote::quote! {
+        #(#new_stmts)*
+    };
+    
+    (new_block_content.to_string(), imports)
 }

@@ -17,6 +17,8 @@
         <bezier-curve d="M 10 10 L 90 10 L 90 90 Z" style="width: 100px; height: 100px; color: rgba(255, 0, 0, 1.0);" />
         <bezier-curve d="M 10 10 C 10 10, 50 10, 50 50 C 50 90, 90 90, 90 90" style="width: 100px; height: 100px; color: rgba(0, 0, 255, 1.0);" />
       </div>
+
+      <TestComponent text="Hello from Prop!" />
       
       <div class="row2">
         <div class="r2-text1">This is a reasonably long piece of text that is intended to test the wrapping capabilities of our flex engine. It should flow nicely within its container.</div>
@@ -34,6 +36,7 @@
 </template>
 
 <script>
+    mod TestComponent;
     let (sidebar_content, set_sidebar_content) = crate::signals::create_signal("SIDEBAR\n(Reactive)".to_string());
     let (count, set_count) = crate::signals::create_signal(0);
     

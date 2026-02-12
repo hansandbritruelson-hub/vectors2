@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+#![allow(dead_code)]
 use crate::FlexEngine;
 use crate::signals::{ReadSignal, create_effect};
 use std::rc::Rc;

@@ -31,27 +31,93 @@ pub fn generate_rust(template: &Template) -> String {
         });
     }
 
+    // Process Imports
+    let mut import_tokens = Vec::new();
+    for import in &template.imports {
+        let mod_name = format_ident!("{}", import.module_name);
+        if import.is_component {
+            import_tokens.push(quote! {
+                #[allow(non_snake_case)]
+                pub mod #mod_name;
+            });
+        }
+    }
+
+    // Check for Props using syn (robust)
+    let script = template.script.as_deref().unwrap_or("");
+    let wrapped_script = format!("{{ {} }}", script);
+    let script_block = syn::parse_str::<syn::Block>(&wrapped_script).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+    
+    let mut module_items = Vec::new();
+    let mut function_stmts = Vec::new();
+
+    for stmt in script_block.stmts {
+        match stmt {
+            syn::Stmt::Item(_) => module_items.push(stmt),
+            _ => function_stmts.push(stmt),
+        }
+    }
+
+    let mut has_props_struct = false;
+    for stmt in &module_items {
+        if let syn::Stmt::Item(syn::Item::Struct(s)) = stmt {
+            if s.ident == "Props" {
+                has_props_struct = true;
+                break;
+            }
+        }
+    }
+    
+    let props_def = if !has_props_struct {
+        quote! {
+            #[allow(dead_code)]
+            #[derive(Clone)]
+            pub struct Props { }
+        }
+    } else {
+        quote! { }
+    };
+
+    // Build signature
+    let build_args = if has_props_struct {
+        quote! { props: Props }
+    } else {
+        quote! { _props: Props }
+    };
+
     let mut root_nodes = Vec::new();
     for node in &template.root {
         root_nodes.push(generate_node(node, None, &mut id_gen));
     }
-
-    let script = template.script.as_deref().unwrap_or("");
-    let script_code: TokenStream = script.parse().unwrap_or_else(|_| quote! {});
     
     let expanded = quote! {
+        #![allow(unused_imports)]
+        #![allow(non_snake_case)]
+        #![allow(dead_code)]
+        #![allow(unused_variables)]
+
         use renderer_core::FlexEngine;
         use renderer_core::ui::{div, text, mount_list, Element};
         use renderer_core::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString};
         use std::rc::Rc;
         use std::cell::RefCell;
 
-        pub fn build_generated_ui(engine: Rc<RefCell<FlexEngine>>) {
+        // Generated Imports
+        #(#import_tokens)*
+
+        // Script Items (Structs, Use, Enums)
+        #(#module_items)*
+
+        // Default Props Definition (if none provided)
+        #props_def
+
+        #[allow(unused_variables)]
+        pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, #build_args) {
             // Register Styles
             register_styles(engine.clone());
 
-            // Script Block
-            #script_code
+            // Script Logic (let bindings, effects)
+            #(#function_stmts)*
 
             // UI Construction
             {
@@ -60,6 +126,7 @@ pub fn generate_rust(template: &Template) -> String {
         }
 
         fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
+            #[allow(unused_mut)]
             let mut e = engine.borrow_mut();
             #(#style_registrations)*
         }
@@ -103,12 +170,47 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
 fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
     *id_gen += 1;
     
+    // Check for Component (PascalCase)
+    let is_component = el.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+
+    if is_component {
+        let component_name = format_ident!("{}", el.name);
+        
+        let mut field_assignments = Vec::new();
+        
+        for attr in &el.attributes {
+            let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
+             if attr.is_dynamic {
+                 let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
+                 field_assignments.push(quote! { #field_name: #expr });
+             } else {
+                 let val = &attr.value;
+                 field_assignments.push(quote! { #field_name: #val.to_string() });
+             }
+        }
+
+        // For components, we return a block that calls build()
+        return quote! {
+            self::#component_name::build(
+                engine.clone(), 
+                // Parent handling for components is tricky in this builder context
+                // We'll need to adapt the architecture later for proper component composition inside children
+                // For now, let's assume components are built imperatively
+                None, 
+                self::#component_name::Props {
+                    #(#field_assignments),*
+                }
+            )
+        };
+    }
+
     let mut builder = if el.name == "div" {
         quote! { div() }
     } else if el.name == "text" {
         quote! { text("") }
     } else if el.name == "bezier-curve" {
-        quote! { div() }
+        // bezier-curve support
+        quote! { div() } 
     } else {
         quote! { div() }
     };
@@ -122,9 +224,6 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
                 builder = quote! { #builder.class(#val) };
             }
             "style" => {
-                // In a perfect world, we'd parse the inline style too. 
-                // For now, let's just emit it if it's literally key:value;
-                // Actually, let's try to parse it.
                 let inline_style = format!("temp {{ {} }}", attr.value);
                 if let Ok((_, rules)) = css::parse_css(&inline_style) {
                     if let Some(rule) = rules.first() {
@@ -167,6 +266,32 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
         match child {
             Node::Element(child_el) => {
                 let child_builder = generate_element_builder(child_el, id_gen);
+                
+                // If child is a component, it returns () from build().
+                // We can't child() it. 
+                // Components must be top-level or handled differently.
+                // Or we make components return their root ID?
+                // The current build() signature returns ().
+                // If we change build() to return u32, we can compose.
+                
+                // Fallback: If "child_builder" starts with "self::", it's a component call.
+                // We should probably just emit it separately? 
+                // But 'child()' expects an Element.
+                
+                // Fix: Components should inject themselves via side-effect (build calls).
+                // They attach to 'parent'.
+                
+                // But here we are building the *Builder* for the *Parent*.
+                // The parent hasn't been built yet!
+                // We cannot pass the parent ID to the child yet.
+                
+                // This implies a fundamental change in how children are handled.
+                // Existing: builder.child(child_builder) -> adds to 'children' vec.
+                // New: 
+                // If child is element: add to children vec.
+                // If child is component: ???
+                
+                // Temporary solution implemented below in generate_element_code to handle this mix.
                 builder = quote! { #builder.child(#child_builder) };
             }
             Node::Text(t) => {
@@ -185,21 +310,45 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
     builder
 }
 
-fn style_value_to_tokens(val: &StyleValue) -> TokenStream {
-    match val {
-        StyleValue::Px(v) => quote! { renderer_core::StyleValue::Px(#v) },
-        StyleValue::Percent(v) => quote! { renderer_core::StyleValue::Percent(#v) },
-        StyleValue::Em(v) => quote! { renderer_core::StyleValue::Em(#v) },
-        StyleValue::Vh(v) => quote! { renderer_core::StyleValue::Vh(#v) },
-        StyleValue::Vw(v) => quote! { renderer_core::StyleValue::Vw(#v) },
-        StyleValue::Color(r, g, b, a) => quote! { renderer_core::StyleValue::Color(#r, #g, #b, #a) },
-        StyleValue::Ident(s) => quote! { renderer_core::StyleValue::Ident(#s.to_string()) },
-        StyleValue::String(s) => quote! { renderer_core::StyleValue::String(#s.to_string()) },
-        StyleValue::Auto => quote! { renderer_core::StyleValue::Auto },
-    }
-}
-
 fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u32) -> TokenStream {
+    // Check for Component (PascalCase)
+    let is_component = el.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+
+    if is_component {
+        let component_name = format_ident!("{}", el.name);
+        
+        // Parent Token
+         let parent_token = if let Some(p) = parent_name {
+            let p_ident = format_ident!("{}", p);
+            quote! { Some(#p_ident) }
+        } else {
+            quote! { None } // Or passed 'parent' if explicit
+        };
+        
+        // Props Construction
+        let mut field_assignments = Vec::new();
+        for attr in &el.attributes {
+            let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
+             if attr.is_dynamic {
+                 let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
+                 field_assignments.push(quote! { #field_name: #expr });
+             } else {
+                 let val = &attr.value;
+                 field_assignments.push(quote! { #field_name: #val.to_string() });
+             }
+        }
+
+        return quote! {
+             self::#component_name::build(
+                engine.clone(), 
+                #parent_token,
+                self::#component_name::Props {
+                    #(#field_assignments),*
+                }
+            );
+        };
+    }
+
     let mut v_for = None;
     for attr in &el.attributes {
         if attr.name == "v-for" {
@@ -237,7 +386,14 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             let p_ident = format_ident!("{}", p);
             quote! { Some(#p_ident) }
         } else {
-            quote! { None }
+            quote! { None } // This should probably be 'parent' argument if at root?
+        };
+        
+        // Correct parent token logic for root nodes
+        let actual_parent_token = if parent_name.is_none() {
+            quote! { parent } // Use the function argument 'parent'
+        } else {
+            parent_token
         };
 
         let mut builder = if el.name == "div" {
@@ -295,13 +451,62 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             }
         }
 
-        let child_codes: Vec<TokenStream> = el.children.iter().map(|c| generate_node(c, Some(&node_var.to_string()), id_gen)).collect();
+        // Child logic improvement
+        // We separate children into Elements (built via builder) and Components (built via side-effect)
+        // If it's a Component, we can't use .child().
+        // We MUST build the parent node first, then pass its ID to the children.
+        // The current builder pattern assumes .child( Element ) returns Self.
+        // But Components return ().
+        
+        // Solution:
+        // 1. Build 'builder' (the current node).
+        // 2. Iterate children.
+        //    If Element -> recursively call.
+        //    If Component -> call Component::build(engine, Some(node_var), props).
+        
+        // We need to NOT adds children to the builder if they are actually components or if we want to build them imperatively.
+        // Actually, 'generate_element_builder' handles the recursive .child() calls.
+        // We should STOP doing that in 'generate_element_builder' if we are moving to imperative style here!
+        
+        // BUT 'generate_element_builder' is used by v-for, which needs an Element return.
+        // v-for lambda must return Element.
+        // So v-for content CANNOT contain top-level Components unless we wrap them in a div?
+        // Or unless 'Component::build' returns the root ID?
+        // Returning ID is safer. 
+        // Let's change Component::build to return u32 (Root ID) or Option<u32>.
+        // But for now, let's stick to imperative construction in 'generate_element_code'.
+        
+        // We need to Filter children in 'generate_element_builder' to ONLY include Elements that can be built inline?
+        // Or we just don't add children in 'generate_element_builder' at all, and do it all here?
+        // 'builder' pattern supports adding children.
+        // If we do it here, we use 'engine.set_parent(child_id, node_var)'.
+        
+        // Let's modify 'generate_element_builder' to NOT recurse children.
+        // We will loop children HERE in 'generate_element_code'.
+        
+        let child_codes: Vec<TokenStream> = el.children.iter().map(|c| {
+            generate_node(c, Some(&node_var.to_string()), id_gen)
+        }).collect();
 
         quote! {
-            let #node_var = #builder.build(engine.clone(), #parent_token);
+            let #node_var = #builder.build(engine.clone(), #actual_parent_token);
             {
                 #(#child_codes)*
             }
         }
+    }
+}
+
+fn style_value_to_tokens(val: &StyleValue) -> TokenStream {
+    match val {
+        StyleValue::Px(v) => quote! { renderer_core::StyleValue::Px(#v) },
+        StyleValue::Percent(v) => quote! { renderer_core::StyleValue::Percent(#v) },
+        StyleValue::Em(v) => quote! { renderer_core::StyleValue::Em(#v) },
+        StyleValue::Vh(v) => quote! { renderer_core::StyleValue::Vh(#v) },
+        StyleValue::Vw(v) => quote! { renderer_core::StyleValue::Vw(#v) },
+        StyleValue::Color(r, g, b, a) => quote! { renderer_core::StyleValue::Color(#r, #g, #b, #a) },
+        StyleValue::Ident(s) => quote! { renderer_core::StyleValue::Ident(#s.to_string()) },
+        StyleValue::String(s) => quote! { renderer_core::StyleValue::String(#s.to_string()) },
+        StyleValue::Auto => quote! { renderer_core::StyleValue::Auto },
     }
 }
