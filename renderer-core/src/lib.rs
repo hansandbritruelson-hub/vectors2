@@ -1442,8 +1442,13 @@ impl FlexEngine {
 
             if x >= left && x <= right && y >= top && y <= bottom {
                 hit_idx = Some(i);
+                log(&format!("Hit Node: {} at ({} , {}). rect: [{}, {}, {}, {}]", i, x, y, left, top, right, bottom));
                 break;
             }
+        }
+
+        if hit_idx.is_none() {
+            log(&format!("No hit at ({} , {})", x, y));
         }
 
         let mut callbacks = Vec::new();

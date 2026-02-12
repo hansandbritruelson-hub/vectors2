@@ -27,7 +27,7 @@ pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, _props: Props
             {
                 let node_3 = div()
                     .class("nav-item")
-                    .on_click(move || {})
+                    .on_click(move || set_view.set("image"))
                     .build(engine.clone(), Some(node_2));
                 {
                     text("Image").build(engine.clone(), Some(node_3));
@@ -35,7 +35,7 @@ pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, _props: Props
                 node_3;
                 let node_4 = div()
                     .class("nav-item")
-                    .on_click(move || {})
+                    .on_click(move || set_view.set("video"))
                     .build(engine.clone(), Some(node_2));
                 {
                     text("Video").build(engine.clone(), Some(node_4));
@@ -84,19 +84,19 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.07058824f32, 0.07058824f32, 0.07058824f32, 1f32),
-        );
-        decls.insert(
             "flex-direction".to_string(),
             renderer_core::StyleValue::Ident("column".to_string()),
         );
         decls.insert(
-            "height".to_string(),
+            "width".to_string(),
             renderer_core::StyleValue::Percent(100f32),
         );
         decls.insert(
-            "width".to_string(),
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.07058824f32, 0.07058824f32, 0.07058824f32, 1f32),
+        );
+        decls.insert(
+            "height".to_string(),
             renderer_core::StyleValue::Percent(100f32),
         );
         e.add_style_rule(".container".to_string(), decls);

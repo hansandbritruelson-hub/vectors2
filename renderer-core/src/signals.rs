@@ -131,12 +131,14 @@ impl<T> Clone for WriteSignal<T> {
 impl<T> Copy for WriteSignal<T> {}
 
 impl<T: 'static + Clone> WriteSignal<T> {
-    pub fn set(&self, new_value: T) {
+    pub fn set<U: Into<T>>(&self, new_value: U) {
+        let val: T = new_value.into();
+        crate::log(&format!("Signal set: id={}", self.id));
         let effects_to_run = RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
             
             // 1. Update value
-            rt.signals.insert(self.id, Box::new(new_value));
+            rt.signals.insert(self.id, Box::new(val));
 
             // 2. Collect subscribers
             if let Some(subs) = rt.subscribers.get(&self.id) {

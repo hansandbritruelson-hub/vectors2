@@ -254,7 +254,8 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
             }
             _ => {
                  if attr.name == "@click" {
-                     let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+                     let sanitized_value = attr.value.replace('\'', "\"");
+                     let expr: syn::Expr = syn::parse_str(&sanitized_value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
                      builder = quote! { #builder.on_click(move || { #expr }) };
                  } else if attr.name == "text" || attr.name == ":text" {
                      if attr.is_dynamic || attr.name == ":text" {
@@ -484,7 +485,8 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 }
                 _ => {
                      if attr.name == "@click" {
-                         let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+                         let sanitized_value = attr.value.replace('\'', "\"");
+                         let expr: syn::Expr = syn::parse_str(&sanitized_value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
                          builder = quote! { #builder.on_click(move || { #expr }) };
                      } else if attr.name == "text" || attr.name == ":text" {
                          if attr.is_dynamic || attr.name == ":text" {
