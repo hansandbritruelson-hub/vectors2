@@ -455,9 +455,6 @@ pub struct CpuNode {
     pub inline_styles: HashMap<String, StyleValue>,
     
     // Cache
-    #[cfg(target_arch = "wasm32")] // Or just always
-    pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
     
     // Events
@@ -571,6 +568,9 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub free_nodes: Vec<u32>,
 
+    #[wasm_bindgen(skip)]
+    pub root_scope_id: Option<crate::signals::ScopeId>,
+
     pub dirty: bool,
 }
 
@@ -599,12 +599,25 @@ impl FlexEngine {
             assets: HashMap::new(),
             stylesheet: StyleSheet::default(),
             free_nodes: Vec::new(),
+            root_scope_id: None,
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
         engine.parse_font();
         engine
     }
+}
+
+impl Drop for FlexEngine {
+    fn drop(&mut self) {
+        if let Some(scope_id) = self.root_scope_id {
+            crate::signals::Scope { id: scope_id }.dispose();
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl FlexEngine {
     
     fn parse_font(&mut self) {
         // Simple fixed size for demo

@@ -84,12 +84,12 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
-        );
-        decls.insert(
             "width".to_string(),
             renderer_core::StyleValue::Percent(100f32),
+        );
+        decls.insert(
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
         );
         decls.insert(
             "height".to_string(),

@@ -455,6 +455,9 @@ impl FlexRenderer {
                  let current_size = Reflect::get(current_curve_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
 
                  if curve_byte_length > current_size {
+                      if let Some(old) = &self.curve_buffer {
+                           old.destroy();
+                      }
                       let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
                            curve_byte_length as f64,
                            0x0080 | 0x0008 | 0x0004
@@ -487,6 +490,9 @@ impl FlexRenderer {
                  let current_size = Reflect::get(current_info_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
 
                  if info_byte_length > current_size {
+                      if let Some(old) = &self.glyph_info_buffer {
+                           old.destroy();
+                      }
                       let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
                            info_byte_length as f64,
                            0x0080 | 0x0008 | 0x0004
@@ -512,6 +518,8 @@ impl FlexRenderer {
         let mut rebind_needed = false;
         {
             let mut engine = self.engine.borrow_mut();
+            engine.texture_atlas.process_deletions();
+            
             if engine.texture_atlas.dirty {
                 let atlas = &mut engine.texture_atlas;
                 let needed_width = atlas.width;

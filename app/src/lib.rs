@@ -20,8 +20,12 @@ pub fn run() -> Result<(), JsValue> {
 pub fn create_app_renderer(device: renderer_core::web_bindings::GpuDevice, context: renderer_core::web_bindings::GpuCanvasContext) -> FlexRenderer {
     let engine = Rc::new(RefCell::new(FlexEngine::new()));
 
-    // Build the UI
-    generated_ui::app::build(engine.clone(), None, generated_ui::app::Props {});
+    // Build the UI in a root scope
+    let root_scope = renderer_core::signals::create_root(|s| {
+        generated_ui::app::build(engine.clone(), None, generated_ui::app::Props {});
+        s
+    });
+    engine.borrow_mut().root_scope_id = Some(root_scope.id);
     
     // Return the renderer, using the shared engine Rc
     FlexRenderer::new_with_ref(device, context, engine)

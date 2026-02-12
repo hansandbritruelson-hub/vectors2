@@ -91,6 +91,20 @@ impl Runtime {
             }
         }
     }
+
+    fn reset(&mut self) {
+        self.current_effect = None;
+        self.current_scope = None;
+        self.signals.clear();
+        self.subscribers.clear();
+        self.effects.clear();
+        self.effect_scopes.clear();
+        self.effect_dependencies.clear();
+        self.scopes.clear();
+        self.next_signal_id = 0;
+        self.next_effect_id = 0;
+        self.next_scope_id = 0;
+    }
 }
 
 thread_local! {
@@ -98,6 +112,12 @@ thread_local! {
 }
 
 // --- Public API ---
+
+pub fn reset_runtime() {
+    RUNTIME.with(|rt| {
+        rt.borrow_mut().reset();
+    });
+}
 
 pub fn create_signal<T: 'static + Clone>(initial_value: T) -> (ReadSignal<T>, WriteSignal<T>) {
     let id = RUNTIME.with(|rt| {
@@ -110,6 +130,8 @@ pub fn create_signal<T: 'static + Clone>(initial_value: T) -> (ReadSignal<T>, Wr
             if let Some(scope) = rt.scopes.get_mut(&scope_id) {
                 scope.signals.push(id);
             }
+        } else {
+            crate::log(&format!("WARNING: Signal created outside of scope! This will NEVER be freed. id={}", id));
         }
         
         id
@@ -136,6 +158,8 @@ where
                 scope.effects.push(id);
                 rt.effect_scopes.insert(id, scope_id);
             }
+        } else {
+            crate::log(&format!("WARNING: Effect created outside of scope! This will NEVER be freed. id={}", id));
         }
 
         id
@@ -147,7 +171,18 @@ where
 pub fn create_root<F, T>(f: F) -> T 
 where F: FnOnce(Scope) -> T
 {
-    let (id, parent) = RUNTIME.with(|rt| {
+    struct ScopeGuard {
+        prev_scope: Option<ScopeId>,
+    }
+    impl Drop for ScopeGuard {
+        fn drop(&mut self) {
+            RUNTIME.with(|rt| {
+                rt.borrow_mut().current_scope = self.prev_scope;
+            });
+        }
+    }
+
+    let _guard = RUNTIME.with(|rt| {
         let mut rt = rt.borrow_mut();
         let id = rt.next_scope_id;
         rt.next_scope_id += 1;
@@ -167,15 +202,12 @@ where F: FnOnce(Scope) -> T
             }
         }
         
+        let prev = rt.current_scope;
         rt.current_scope = Some(id);
-        (id, parent)
+        (id, ScopeGuard { prev_scope: prev })
     });
 
-    let result = f(Scope { id });
-
-    RUNTIME.with(|rt| {
-        rt.borrow_mut().current_scope = parent;
-    });
+    let result = f(Scope { id: _guard.0 });
 
     result
 }
