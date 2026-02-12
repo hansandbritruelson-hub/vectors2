@@ -40,9 +40,9 @@ pub fn generate_rust(template: &Template) -> String {
     let script_code: TokenStream = script.parse().unwrap_or_else(|_| quote! {});
     
     let expanded = quote! {
-        use crate::FlexEngine;
-        use crate::ui::{div, text, mount_list, Element};
-        use crate::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString};
+        use renderer_core::FlexEngine;
+        use renderer_core::ui::{div, text, mount_list, Element};
+        use renderer_core::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString};
         use std::rc::Rc;
         use std::cell::RefCell;
 
@@ -181,15 +181,15 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
 
 fn style_value_to_tokens(val: &StyleValue) -> TokenStream {
     match val {
-        StyleValue::Px(v) => quote! { crate::StyleValue::Px(#v) },
-        StyleValue::Percent(v) => quote! { crate::StyleValue::Percent(#v) },
-        StyleValue::Em(v) => quote! { crate::StyleValue::Em(#v) },
-        StyleValue::Vh(v) => quote! { crate::StyleValue::Vh(#v) },
-        StyleValue::Vw(v) => quote! { crate::StyleValue::Vw(#v) },
-        StyleValue::Color(r, g, b, a) => quote! { crate::StyleValue::Color(#r, #g, #b, #a) },
-        StyleValue::Ident(s) => quote! { crate::StyleValue::Ident(#s.to_string()) },
-        StyleValue::String(s) => quote! { crate::StyleValue::String(#s.to_string()) },
-        StyleValue::Auto => quote! { crate::StyleValue::Auto },
+        StyleValue::Px(v) => quote! { renderer_core::StyleValue::Px(#v) },
+        StyleValue::Percent(v) => quote! { renderer_core::StyleValue::Percent(#v) },
+        StyleValue::Em(v) => quote! { renderer_core::StyleValue::Em(#v) },
+        StyleValue::Vh(v) => quote! { renderer_core::StyleValue::Vh(#v) },
+        StyleValue::Vw(v) => quote! { renderer_core::StyleValue::Vw(#v) },
+        StyleValue::Color(r, g, b, a) => quote! { renderer_core::StyleValue::Color(#r, #g, #b, #a) },
+        StyleValue::Ident(s) => quote! { renderer_core::StyleValue::Ident(#s.to_string()) },
+        StyleValue::String(s) => quote! { renderer_core::StyleValue::String(#s.to_string()) },
+        StyleValue::Auto => quote! { renderer_core::StyleValue::Auto },
     }
 }
 

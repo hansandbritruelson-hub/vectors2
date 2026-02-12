@@ -1,8 +1,27 @@
-import { FlexRenderer } from 'renderer-core';
-import initWasm from 'renderer-core';
+import init, { create_app_renderer, FlexRenderer } from 'renderer-core';
+// import shadersAtlas from './shaders_atlas.wgsl?raw';
 
-const init = async () => {
-    await initWasm();
+async function run() {
+    await init();
+
+    let renderer: FlexRenderer | undefined;
+    let pendingFrame = false;
+
+    const renderFrame = () => {
+        pendingFrame = false;
+        if (renderer) {
+            renderer.render();
+        }
+    };
+
+    (window as any).requestRenderFrame = () => {
+        if (!pendingFrame) {
+            pendingFrame = true;
+            requestAnimationFrame(renderFrame);
+        }
+    };
+
+    // Initialize the App (moved until after we have device/context)
 
     if (!navigator.gpu) {
         document.body.innerHTML = "WebGPU not supported.";
@@ -40,21 +59,7 @@ const init = async () => {
         format: presentationFormat,
     });
 
-    const renderer = new FlexRenderer(device, context);
-
-    // Push-based Render Loop
-    let pendingFrame = false;
-    const renderFrame = () => {
-        pendingFrame = false;
-        renderer.render();
-    };
-
-    (window as any).requestRenderFrame = () => {
-        if (!pendingFrame) {
-            pendingFrame = true;
-            requestAnimationFrame(renderFrame);
-        }
-    };
+    renderer = create_app_renderer(device, context);
 
     await renderer.init();
 
@@ -62,6 +67,7 @@ const init = async () => {
     renderer.render();
 
     canvas.addEventListener('mousedown', async (e) => {
+        if (!renderer) return;
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -72,10 +78,10 @@ const init = async () => {
 
     // Expose debug for manual inspection
     (window as any).debugRenderer = () => {
-        renderer.debug();
+        if (renderer) renderer.debug();
     };
 
     console.log("Renderer initialized. Periodic updates enabled for testing.");
 };
 
-init();
+run();

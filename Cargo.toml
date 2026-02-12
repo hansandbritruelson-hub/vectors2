@@ -3,6 +3,7 @@
 members = [
     "renderer-core",
     "ui-compiler",
+    "app",
 ]
 
 resolver = "2"

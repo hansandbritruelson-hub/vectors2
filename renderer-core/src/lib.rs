@@ -7,7 +7,7 @@ pub mod ui;
 pub mod web_bindings;
 pub mod signals;
 pub mod texture_atlas;
-pub mod generated_ui;
+// REMOVED: pub mod generated_ui;
 #[cfg(test)]
 mod tests;
 pub use renderer::FlexRenderer;
@@ -19,8 +19,7 @@ pub fn log(s: &str) {
     println!("{}", s);
 }
 
-// Include generated assets
-include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
+// REMOVED: include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
 
@@ -1261,18 +1260,8 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
     let bytes: Vec<u8>;
 
     if url.starts_with("asset:") {
-        let path = url.trim_start_matches("asset:");
-        // Remove strictly one leading slash if present, to match build.rs keys (which are filenames)
-        // But user might say "asset:paintbrush.svg" or "asset:/paintbrush.svg"
-        let clean_path = path.trim_start_matches('/');
-        
-        if let Some(asset_bytes) = get_asset(clean_path) {
-            log(&format!("Asset found in bundle: {}", clean_path));
-            bytes = asset_bytes.to_vec();
-        } else {
-            log(&format!("Asset NOT found in bundle: {}", clean_path));
-            return;
-        }
+         log("Renderer does not handle asset: URLs internally anymore. Use load_asset_bytes from App.");
+         return;
     } else {
         // HTTP Download
         // log(&format!("Downloading image: {}", url));
@@ -1295,13 +1284,9 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
     
     // Simplified: Just store the source bytes. Flatten will handle resizing/rendering.
     // Determine ID from URL
-    let id = if url.starts_with("asset:") {
-        url.trim_start_matches("asset:").trim_start_matches('/').to_string()
-    } else {
-        url.clone()
-    };
+    let id = url.clone(); 
     
-    engine.borrow_mut().add_asset(id, bytes);
+    engine.borrow_mut().load_asset_bytes(&id, bytes);
 }
 
 #[wasm_bindgen]
@@ -1379,9 +1364,8 @@ impl FlexEngine {
     }
     
     // Stores raw asset data for resizing later
-    pub fn add_asset(&mut self, id: String, data: Vec<u8>) {
-        self.assets.insert(id, data);
-        self.mark_dirty();
+    pub fn load_asset_bytes(&mut self, id: &str, data: Vec<u8>) {
+         self.assets.insert(id.to_string(), data);
     }
     
     pub fn get_asset_data(&self, id: &str) -> Option<&Vec<u8>> {

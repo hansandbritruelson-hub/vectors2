@@ -64,13 +64,20 @@ pub struct FlexRenderer {
 #[wasm_bindgen]
 impl FlexRenderer {
     #[wasm_bindgen(constructor)]
-    pub fn new(device: GpuDevice, context: GpuCanvasContext) -> FlexRenderer {
-        log(&format!("--- RENDERER STARTUP ---"));
+    pub fn new(device: GpuDevice, context: GpuCanvasContext, engine: FlexEngine) -> FlexRenderer {
+        let engine = Rc::new(RefCell::new(engine));
+        Self::new_with_ref(device, context, engine)
+    }
+}
+
+
+
+impl FlexRenderer {
+    pub fn new_with_ref(device: GpuDevice, context: GpuCanvasContext, engine: Rc<RefCell<FlexEngine>>) -> FlexRenderer {
+        log(&format!("--- RENDERER STARTUP (Shared Engine) ---"));
         log(&format!("GpuNode size: {} bytes", std::mem::size_of::<crate::GpuNode>()));
         log(&format!("Character size: {} bytes", std::mem::size_of::<crate::Character>()));
         log(&format!("GlyphData size: {} bytes", std::mem::size_of::<crate::GlyphData>()));
-
-        let engine = Rc::new(RefCell::new(FlexEngine::new()));
 
         FlexRenderer {
             device,
@@ -103,11 +110,16 @@ impl FlexRenderer {
             sampler: None,
         }
     }
+}
+
+#[wasm_bindgen]
+impl FlexRenderer {
 
     pub fn init(&mut self) -> Result<(), wasm_bindgen::JsValue> {
         // log("Rust Renderer Initializing...");
 
-        crate::ui::build_ui(self.engine.clone());
+        // UI building is now handled externally before passing engine
+        // crate::ui::build_ui(self.engine.clone());
 
         let engine = self.engine.borrow();
         const USAGE_STORAGE: u32 = 0x0080;

@@ -4,9 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "wasm:build": "wasm-pack build renderer-core --target web",
-    "dev": "npm run wasm:build && vite",
-    "build": "npm run wasm:build && tsc && vite build",
+    "build:compiler": "cargo build -p ui-compiler",
+    "compile:ui": "./target/debug/ui-compiler templates/App.vue --output app/src/generated_ui/app.rs",
+    "wasm:build": "wasm-pack build app --target web",
+    "dev": "npm run build:compiler && npm run compile:ui && npm run wasm:build && vite",
+    "build": "npm run build:compiler && npm run compile:ui && npm run wasm:build && tsc && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -18,6 +20,6 @@
     "wasm-pack": "^0.14.0"
   },
   "dependencies": {
-    "renderer-core": "file:renderer-core/pkg"
+    "renderer-core": "file:app/pkg"
   }
 }

@@ -202,16 +202,7 @@ where
 
 // --- UI Construction ---
 
-pub fn build_ui(engine: Rc<RefCell<FlexEngine>>) {
-    // Call the generated UI
-    crate::generated_ui::app::build_generated_ui(engine.clone());
+// --- UI Construction ---
 
-    // Trigger Asset Loads for images used in the template
-    {
-        let engine_clone = engine.clone();
-        spawn_local(async move {
-            // Load Asset
-            crate::load_image_to_engine(engine_clone, "asset:paintbrush.svg".to_string()).await;
-        });
-    }
-}
+// build_ui removed. Logic moved to app crate.
+
