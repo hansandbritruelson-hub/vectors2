@@ -214,6 +214,7 @@ where F: FnOnce(Scope) -> T
     result
 }
 
+#[derive(Clone, Copy)]
 pub struct Scope {
     pub id: ScopeId,
 }
@@ -380,12 +381,16 @@ fn run_effect(id: EffectId) {
         // 4. Run it
         f();
 
-        // 4. Restore context and put effect back
+        // 4. Restore context and put effect back if it hasn't been disposed
         RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
             rt.current_effect = prev_effect;
             rt.current_scope = prev_scope;
-            rt.effects.insert(id, f);
+            
+            // If the effect's scope was disposed during execution, don't put it back!
+            if rt.effect_scopes.contains_key(&id) {
+                rt.effects.insert(id, f);
+            }
         });
     }
 }

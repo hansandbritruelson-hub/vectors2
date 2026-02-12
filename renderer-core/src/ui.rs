@@ -116,18 +116,22 @@ impl Element {
         }
 
         if let Some(sig) = self.flags_signal {
-             let engine_clone = engine.clone();
+             let engine_weak = Rc::downgrade(&engine);
              create_effect(move || {
-                 let val = sig.get();
-                 engine_clone.borrow_mut().update_node_flags(node_id, val);
+                 if let Some(engine) = engine_weak.upgrade() {
+                     let val = sig.get();
+                     engine.borrow_mut().update_node_flags(node_id, val);
+                 }
              });
         }
 
         if let Some(sig) = self.text_signal {
-             let engine_clone = engine.clone();
+             let engine_weak = Rc::downgrade(&engine);
              create_effect(move || {
-                 let val = sig.get();
-                 engine_clone.borrow_mut().set_text(node_id, &val);
+                 if let Some(engine) = engine_weak.upgrade() {
+                     let val = sig.get();
+                     engine.borrow_mut().set_text(node_id, &val);
+                 }
              });
         }
 
@@ -170,45 +174,47 @@ where
     // Infrastructure for Keyed Diffing: even if items move, we keep their nodes.
     let mut mounted_nodes: HashMap<String, u32> = HashMap::new();
 
+    let engine_weak = Rc::downgrade(&engine);
     create_effect(move || {
-        let items = items_sig.get();
-        let mut new_mounted: HashMap<String, u32> = HashMap::new();
-        let mut new_order: Vec<String> = Vec::new();
-        
-        // 1. Reconciliation Pass
-        let mut last_id = anchor_id;
-        for item in items {
-            let key = key_fn(&item);
-            new_order.push(key.clone());
+        if let Some(engine) = engine_weak.upgrade() {
+            let items = items_sig.get();
+            let mut new_mounted: HashMap<String, u32> = HashMap::new();
             
-            let node_id = if let Some(&existing_id) = mounted_nodes.get(&key) {
-                // Reuse existing node!
-                engine.borrow_mut().insert_after_node(existing_id, parent, Some(last_id));
-                existing_id
-            } else {
-                // Build new node in a new scope
-                let (id, scope) = crate::signals::create_root(|s| {
-                    (template(item).build_after(engine.clone(), Some(parent), Some(last_id)), s)
-                });
-                engine.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
-                id
-            };
-            
-            new_mounted.insert(key, node_id);
-            last_id = node_id;
-        }
+            // 1. Reconciliation Pass
+            let mut last_id = anchor_id;
+            for item in items {
+                let key = key_fn(&item);
+                
+                let node_id = if let Some(&existing_id) = mounted_nodes.get(&key) {
+                    // Reuse existing node!
+                    engine.borrow_mut().insert_after_node(existing_id, parent, Some(last_id));
+                    existing_id
+                } else {
+                    // Build new node in a new scope
+                    let engine_clone = engine.clone();
+                    let (id, scope) = crate::signals::create_root(|s| {
+                        (template(item).build_after(engine_clone, Some(parent), Some(last_id)), s)
+                    });
+                    engine.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
+                    id
+                };
+                
+                new_mounted.insert(key, node_id);
+                last_id = node_id;
+            }
 
-        // 2. Cleanup Pass: Remove nodes no longer in the list
-        {
-            let mut e = engine.borrow_mut();
-            for (key, id) in mounted_nodes.drain() {
-                if !new_mounted.contains_key(&key) {
-                    e.delete_node_recursive(id);
+            // 2. Cleanup Pass: Remove nodes no longer in the list
+            {
+                let mut e = engine.borrow_mut();
+                for (key, id) in mounted_nodes.drain() {
+                    if !new_mounted.contains_key(&key) {
+                        e.delete_node_recursive(id);
+                    }
                 }
             }
-        }
 
-        mounted_nodes = new_mounted;
+            mounted_nodes = new_mounted;
+        }
     });
 }
 
@@ -235,24 +241,26 @@ where
 
     let mounted_id = Rc::new(RefCell::new(None));
 
-    let engine_clone = engine.clone();
+    let engine_weak = Rc::downgrade(&engine);
     create_effect(move || {
-        let is_true = condition.get();
-        let mut current = mounted_id.borrow_mut();
-        
-        if is_true {
-            if current.is_none() {
-                // Create in a new scope
-                let (id, scope) = crate::signals::create_root(|s| (template(), s));
-                
-                engine_clone.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
-                // Ensure it's correctly placed after the anchor
-                engine_clone.borrow_mut().insert_after_node(id, parent, Some(anchor_id));
-                *current = Some(id);
-            }
-        } else {
-            if let Some(id) = current.take() {
-                engine_clone.borrow_mut().delete_node_recursive(id);
+        if let Some(engine) = engine_weak.upgrade() {
+            let is_true = condition.get();
+            let mut current = mounted_id.borrow_mut();
+            
+            if is_true {
+                if current.is_none() {
+                    // Create in a new scope
+                    let (id, scope) = crate::signals::create_root(|s| (template(), s));
+                    
+                    engine.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
+                    // Ensure it's correctly placed after the anchor
+                    engine.borrow_mut().insert_after_node(id, parent, Some(anchor_id));
+                    *current = Some(id);
+                }
+            } else {
+                if let Some(id) = current.take() {
+                    engine.borrow_mut().delete_node_recursive(id);
+                }
             }
         }
     });

@@ -561,7 +561,8 @@ pub struct FlexEngine {
     pub texture_atlas: texture_atlas::TextureAtlas,
     #[wasm_bindgen(skip)]
     pub assets: HashMap<String, Vec<u8>>,
-
+    #[wasm_bindgen(skip)]
+    pub asset_ref_counts: HashMap<String, usize>,
     #[wasm_bindgen(skip)]
     pub stylesheet: StyleSheet,
 
@@ -597,6 +598,7 @@ impl FlexEngine {
             face: None,
             texture_atlas: texture_atlas::TextureAtlas::new(2048, 2048),
             assets: HashMap::new(),
+            asset_ref_counts: HashMap::new(),
             stylesheet: StyleSheet::default(),
             free_nodes: Vec::new(),
             root_scope_id: None,
@@ -842,6 +844,10 @@ impl FlexEngine {
         }
 
         // 4. Mark as free
+        // Decrement asset ref count if this node was holding one
+        if let Some(asset_id) = self.cpu_nodes[node_idx].image_asset_id.take() {
+            self.decrement_asset_ref(&asset_id);
+        }
         self.cpu_nodes[node_idx] = CpuNode::new();
         self.free_nodes.push(node_id);
         self.mark_dirty();
@@ -1096,13 +1102,13 @@ impl FlexEngine {
         while let Some(cpu_idx) = queue.pop_front() {
             let gpu_idx = *cpu_to_gpu.get(&cpu_idx).unwrap();
             
-            // 1. Copy Data from CPU Node to GPU Node
+            // 2. Clear Styles & Data
+            // from CPU Node to GPU Node
             // (We do this here to ensure mapped index is ready)
             let cpu_node = &self.cpu_nodes[cpu_idx];
             
             // We need to mutate the GPU node which is already in the vec
             // But we also need to append children, which might realloc.
-            // Safe indices.
             
             // Calculate Children Range
             let start_child_gpu_idx = self.gpu_nodes.len() as u32;
@@ -1280,13 +1286,25 @@ impl FlexEngine {
         self.mark_dirty();
     }
 
-    pub fn set_image_asset_id(&mut self, node_index: u32, asset_id: &str) {
-        if (node_index as usize) >= self.cpu_nodes.len() { return; }
-        self.cpu_nodes[node_index as usize].image_asset_id = Some(asset_id.to_string());
-        // Clear value cache to force re-fetch
-        self.cpu_nodes[node_index as usize].cached_texture = None;
+    pub fn set_image_asset_id(&mut self, node_id: u32, asset_id: &str) {
+        let old_id = if let Some(node) = self.cpu_nodes.get_mut(node_id as usize) {
+            node.image_asset_id.take()
+        } else {
+            return;
+        };
         
-        self.cpu_nodes[node_index as usize].flags |= 2;
+        if let Some(id) = old_id {
+            self.decrement_asset_ref(&id);
+        }
+        
+        self.increment_asset_ref(asset_id);
+
+        if let Some(node) = self.cpu_nodes.get_mut(node_id as usize) {
+            node.image_asset_id = Some(asset_id.to_string());
+            node.cached_texture = None;
+            node.flags |= 2;
+        }
+        
         self.mark_dirty();
     }
 
@@ -1428,6 +1446,23 @@ impl FlexEngine {
         // We don't necessarily clear the texture atlas cache here,
         // because existing nodes might still be using the texture.
         // The atlas cache uses Weak refs, and TextureHandle drop handles deallocation.
+    }
+
+    fn increment_asset_ref(&mut self, id: &str) {
+        let count = self.asset_ref_counts.entry(id.to_string()).or_insert(0);
+        *count += 1;
+    }
+
+    fn decrement_asset_ref(&mut self, id: &str) {
+        if let Some(count) = self.asset_ref_counts.get_mut(id) {
+            if *count > 0 {
+                *count -= 1;
+                if *count == 0 {
+                    self.unload_asset(id);
+                    self.asset_ref_counts.remove(id);
+                }
+            }
+        }
     }
 }
 
