@@ -850,7 +850,11 @@ impl FlexEngine {
 
 impl FlexEngine {
     pub fn add_style_rule(&mut self, selector: String, declarations: HashMap<String, StyleValue>) {
-        self.stylesheet.rules.push(StyleRule { selector, declarations });
+        if let Some(pos) = self.stylesheet.rules.iter().position(|r| r.selector == selector) {
+            self.stylesheet.rules[pos].declarations = declarations;
+        } else {
+            self.stylesheet.rules.push(StyleRule { selector, declarations });
+        }
         self.mark_dirty();
     }
 

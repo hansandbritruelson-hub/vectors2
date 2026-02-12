@@ -1,8 +1,8 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::signals::{create_signal, create_effect};
-    use crate::FlexEngine;
+    use crate::signals::{create_signal, create_effect, create_root};
+    use crate::{FlexEngine, StyleValue};
     use crate::ui::div;
 
     #[test]
@@ -138,6 +138,20 @@ mod tests {
         // Since we dropped all Rcs, the Weak in cache should be upgradable to None
         let h3 = atlas.get_handle(&key);
         assert!(h3.is_none(), "Cache should allow handle to die");
+    }
+
+    #[test]
+    fn test_style_rule_deduplication() {
+        let mut engine = FlexEngine::new();
+        let mut decls = std::collections::HashMap::new();
+        decls.insert("width".to_string(), StyleValue::Px(100.0));
+        
+        engine.add_style_rule(".test".to_string(), decls.clone());
+        assert_eq!(engine.stylesheet.rules.len(), 1);
+        
+        // Add same selector again
+        engine.add_style_rule(".test".to_string(), decls);
+        assert_eq!(engine.stylesheet.rules.len(), 1, "Should replace existing rule, not append");
     }
 }
 

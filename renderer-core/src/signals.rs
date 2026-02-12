@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-// use std::rc::Rc;
 use std::collections::{HashSet, HashMap};
 use std::any::Any;
 
@@ -79,6 +78,9 @@ impl Runtime {
                     for signal_id in deps {
                         if let Some(subs) = self.subscribers.get_mut(&signal_id) {
                             subs.remove(&effect_id);
+                            if subs.is_empty() {
+                                self.subscribers.remove(&signal_id);
+                            }
                         }
                     }
                 }
@@ -367,6 +369,9 @@ fn run_effect(id: EffectId) {
                 for signal_id in deps {
                     if let Some(subs) = rt.subscribers.get_mut(&signal_id) {
                         subs.remove(&id);
+                        if subs.is_empty() {
+                            rt.subscribers.remove(&signal_id);
+                        }
                     }
                 }
             }
@@ -473,6 +478,36 @@ mod tests {
         // Update B (should trigger now)
         write_b.set(11i32);
         assert_eq!(*call_count.borrow(), 4);
+    }
+
+    #[test]
+    fn test_subscriber_cleanup() {
+        reset_runtime();
+        let (read_a, _write_a) = create_signal(1i32);
+        
+        let sub_count = RUNTIME.with(|rt| {
+            rt.borrow().subscribers.len()
+        });
+        assert_eq!(sub_count, 0);
+
+        let scope = create_root(|s| {
+            create_effect(move || {
+                read_a.get();
+            });
+            s
+        });
+
+        let sub_count = RUNTIME.with(|rt| {
+            rt.borrow().subscribers.len()
+        });
+        assert_eq!(sub_count, 1);
+
+        scope.dispose();
+
+        let sub_count = RUNTIME.with(|rt| {
+            rt.borrow().subscribers.len()
+        });
+        assert_eq!(sub_count, 0, "Subscribers map should be empty after scope disposal");
     }
 }
 
