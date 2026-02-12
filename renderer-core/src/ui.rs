@@ -32,6 +32,7 @@ pub struct Element {
     classes: Vec<String>,
     inline_styles: HashMap<String, crate::StyleValue>,
     children: Vec<Element>,
+    path_data: Option<String>,
 }
 
 impl Element {
@@ -46,8 +47,10 @@ impl Element {
             classes: Vec::new(),
             inline_styles: HashMap::new(),
             children: Vec::new(),
+            path_data: None,
         }
     }
+
 
     pub fn class(mut self, name: &str) -> Self {
         self.classes.push(name.to_string());
@@ -79,6 +82,8 @@ impl Element {
 
     pub fn text(mut self, s: &str) -> Self { self.text_content = Some(s.to_string()); self }
     pub fn image(mut self, id: &str) -> Self { self.image_id = Some(id.to_string()); self }
+    pub fn path(mut self, d: &str) -> Self { self.path_data = Some(d.to_string()); self }
+
 
     pub fn build(self, engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>) -> u32 {
         self.build_after(engine, parent, None)
@@ -95,7 +100,9 @@ impl Element {
             node.flags = self.flags;
             if let Some(s) = self.text_content { node.text = Some(s); }
             if let Some(id) = self.image_id { node.image_asset_id = Some(id); }
+            if let Some(p) = self.path_data { node.shape_data = Some(p); }
             if let Some(f) = self.on_click { node.on_click = Some(f); }
+
             
             if let Some(p) = parent {
                 if let Some(a) = after {

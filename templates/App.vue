@@ -13,6 +13,11 @@
         <div class="r1-right">Row 1 - Right Div</div>
       </div>
       
+      <div class="curve-test" style="height: 150px; background-color: #222;">
+        <bezier-curve d="M 10 10 L 90 10 L 90 90 Z" style="width: 100px; height: 100px; color: rgba(255, 0, 0, 1.0);" />
+        <bezier-curve d="M 10 10 C 10 10, 50 10, 50 50 C 50 90, 90 90, 90 90" style="width: 100px; height: 100px; color: rgba(0, 0, 255, 1.0);" />
+      </div>
+      
       <div class="row2">
         <div class="r2-text1">This is a reasonably long piece of text that is intended to test the wrapping capabilities of our flex engine. It should flow nicely within its container.</div>
         <div class="r2-text2">Another long block of text here, serving as the second part of Row 2. We want to ensure that multiple wrapping blocks can coexist side-by-side in a row.</div>

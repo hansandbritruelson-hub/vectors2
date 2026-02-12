@@ -36,7 +36,9 @@ struct Node {
     uv_max_y: f32,
     
     // --- Padding to 128 bytes ---
-    _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
+    cpu_index: u32, 
+    curve_start_index: u32, 
+    curve_count: u32, 
 };
 
 struct Character {
@@ -88,6 +90,9 @@ struct VertexOutput {
     @location(1) local_pos: vec2<f32>,
     @location(2) @interpolate(flat) glyph_index: u32,
     @location(3) @interpolate(flat) flags: u32,
+    @location(4) @interpolate(flat) curve_start: u32,
+    @location(5) @interpolate(flat) curve_count: u32,
+    @location(6) @interpolate(flat) dimensions: vec2<f32>,
 };
 
 @vertex
@@ -126,22 +131,67 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
     // Map 0..1 UV to Atlas UV
-    let atlas_u = mix(node.uv_min_x, node.uv_max_x, uv.x);
-    let atlas_v = mix(node.uv_min_y, node.uv_max_y, uv.y);
+    var atlas_u = mix(node.uv_min_x, node.uv_max_x, uv.x);
+    var atlas_v = mix(node.uv_min_y, node.uv_max_y, uv.y);
+    
+    // If it's a shape (Bit 2), pass raw 0..1 UV in local_pos (or scaled to pixels?)
+    // Let's pass 0..1 here, and scale in FS using dimensions.
+    if ((node.flags & 4u) != 0u) {
+        atlas_u = uv.x;
+        atlas_v = uv.y;
+    }
+
     out.local_pos = vec2<f32>(atlas_u, atlas_v);
     out.glyph_index = 0u;
     out.flags = node.flags;
+    out.curve_start = node.curve_start_index;
+    out.curve_count = node.curve_count;
+    out.dimensions = vec2<f32>(node.final_width, node.final_height);
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    // Calculate derivatives unconditionally to ensure uniform control flow
+    let pixel_pos_deriv = in.local_pos * in.dimensions;
+    let dx = dpdx(pixel_pos_deriv);
+    let dy = dpdy(pixel_pos_deriv);
+
     // Check if Image Flag (Bit 1 = Value 2) is set
     if ((in.flags & 2u) != 0u) {
         let tex_color = textureSampleLevel(t_diffuse, s_diffuse, in.local_pos, 0.0);
         return tex_color;
-        // Optionally mix with background color? For now just replace.
     }
+    
+    // Check if Shape Flag (Bit 2 = Value 4) is set
+    if ((in.flags & 4u) != 0u) {
+         if (in.curve_count == 0u) { discard; }
+         
+         let pixel_pos = in.local_pos * in.dimensions;
+         
+         // MSAA (4x4)
+         var total_coverage = 0.0;
+         let SAMPLES = 4u;
+         let STEP = 1.0 / f32(SAMPLES);
+         
+         for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
+             for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {
+                 let offset = vec2<f32>(f32(sx) + 0.5, f32(sy) + 0.5) * STEP;
+                 
+                  // Sample point offset in pixel space
+                 let sub_offset = (vec2<f32>(f32(sx), f32(sy)) / f32(SAMPLES)) - 0.5;
+                 let p_sub = pixel_pos + sub_offset.x * dx + sub_offset.y * dy;
+                 
+                 if (calculate_winding(p_sub, in.curve_start, in.curve_count) != 0) {
+                     total_coverage += 1.0;
+                 }
+             }
+         }
+         
+         let alpha = total_coverage / f32(SAMPLES * SAMPLES);
+         return vec4<f32>(in.color.rgb, alpha * in.color.a);
+    }
+    
     return in.color;
 }
 
@@ -182,6 +232,10 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // White Text
     out.local_pos = corner - vec2(1.0, 1.0);
     out.glyph_index = char.glyph_index;
+    out.flags = 0u; // Text typically doesn't use these flags in FS, but be safe
+    out.curve_start = 0u;
+    out.curve_count = 0u;
+    out.dimensions = vec2(0.0, 0.0);
     return out;
 }
 
@@ -214,6 +268,12 @@ fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {
     let start = info.start_index;
     let count = info.count;
     
+    return calculate_winding(p, start, count) != 0;
+}
+
+fn calculate_winding(p: vec2<f32>, start: u32, count: u32) -> i32 {
+    var winding = 0;
+
     for (var i = 0u; i < count; i = i + 1u) {
         let curve = curves[start + i];
         let p0 = curve.p0;
@@ -251,10 +311,10 @@ fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {
                 let s_disc = sqrt(disc);
                 let t1 = (-q_b - s_disc) / (2.0 * q_a);
                 let t2 = (-q_b + s_disc) / (2.0 * q_a);
-                if (t1 > 0.0 && t1 < 1.0) { splits[num_splits] = t1; num_splits++; }
+                if (t1 > 0.0 && t1 < 1.0) { splits[num_splits] = t1; num_splits += 1u; }
                 if (t2 > 0.0 && t2 < 1.0) {
                     if (num_splits == 0u || abs(t2 - splits[0]) > 1e-6) {
-                        splits[num_splits] = t2; num_splits++;
+                        splits[num_splits] = t2; num_splits += 1u;
                     }
                 }
             }
@@ -267,7 +327,7 @@ fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {
         
         // 2. Process each monotonic segment
         var t_prev = 0.0;
-        for (var k = 0u; k <= num_splits; k++) {
+        for (var k = 0u; k <= num_splits; k += 1u) {
             var t_next = 1.0;
             if (k < num_splits) { t_next = splits[k]; }
             
@@ -275,7 +335,7 @@ fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {
             t_prev = t_next;
         }
     }
-    return winding != 0;
+    return winding;
 }
 
 fn process_monotonic_segment(t0: f32, t1: f32, p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, winding: ptr<function, i32>) {

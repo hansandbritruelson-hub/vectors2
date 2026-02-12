@@ -107,6 +107,8 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
         quote! { div() }
     } else if el.name == "text" {
         quote! { text("") }
+    } else if el.name == "bezier-curve" {
+        quote! { div() }
     } else {
         quote! { div() }
     };
@@ -136,6 +138,10 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
             "image" => {
                 let val = &attr.value;
                 builder = quote! { #builder.image(#val) };
+            }
+            "data" | "d" => {
+                let val = &attr.value;
+                builder = quote! { #builder.path(#val) };
             }
             _ => {
                  if attr.name == "@click" {
@@ -238,6 +244,8 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             quote! { div() }
         } else if el.name == "text" {
             quote! { text("") }
+        } else if el.name == "bezier-curve" {
+            quote! { div() }
         } else {
             quote! { div() }
         };
@@ -262,6 +270,10 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 "image" => {
                     let val = &attr.value;
                     builder = quote! { #builder.image(#val) };
+                }
+                "data" | "d" => {
+                    let val = &attr.value;
+                    builder = quote! { #builder.path(#val) };
                 }
                 _ => {
                      if attr.name == "@click" {

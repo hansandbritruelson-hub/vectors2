@@ -90,14 +90,19 @@ impl PathCollector {
         }
     }
 
-    fn tx(&self, x: f32) -> f32 { (x - self.x_min) * self.scale }
-    fn ty(&self, y: f32) -> f32 { (self.y_max - y) * self.scale }
+    // For font parsing (y-up, variable scale)
+    fn tx_font(&self, x: f32) -> f32 { (x - self.x_min) * self.scale }
+    fn ty_font(&self, y: f32) -> f32 { (self.y_max - y) * self.scale }
+
+    // For shape parsing (y-down, 1:1 scale usually)
+    fn tx_shape(&self, x: f32) -> f32 { x }
+    fn ty_shape(&self, y: f32) -> f32 { y }
     
-    fn add_line(&mut self, x: f32, y: f32) {
+    fn add_line(&mut self, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p3_x = self.tx(x);
-        let p3_y = self.ty(y);
+        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
+        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
 
         // Represent line as cubic
         let p1_x = p0_x + (p3_x - p0_x) / 3.0;
@@ -115,13 +120,13 @@ impl PathCollector {
         self.current_y = p3_y;
     }
     
-    fn add_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+    fn add_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let cp_x = self.tx(x1);
-        let cp_y = self.ty(y1);
-        let p3_x = self.tx(x);
-        let p3_y = self.ty(y);
+        let cp_x = if is_font { self.tx_font(x1) } else { self.tx_shape(x1) };
+        let cp_y = if is_font { self.ty_font(y1) } else { self.ty_shape(y1) };
+        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
+        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
 
         // Represent quadratic as cubic
         let p1_x = p0_x + 2.0 * (cp_x - p0_x) / 3.0;
@@ -139,15 +144,15 @@ impl PathCollector {
         self.current_y = p3_y;
     }
 
-    fn add_cubic(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+    fn add_cubic(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p1_x = self.tx(x1);
-        let p1_y = self.ty(y1);
-        let p2_x = self.tx(x2);
-        let p2_y = self.ty(y2);
-        let p3_x = self.tx(x);
-        let p3_y = self.ty(y);
+        let p1_x = if is_font { self.tx_font(x1) } else { self.tx_shape(x1) };
+        let p1_y = if is_font { self.ty_font(y1) } else { self.ty_shape(y1) };
+        let p2_x = if is_font { self.tx_font(x2) } else { self.tx_shape(x2) };
+        let p2_y = if is_font { self.ty_font(y2) } else { self.ty_shape(y2) };
+        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
+        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
 
         self.curves.push(GpuCurve {
             p0_x, p0_y,
@@ -158,26 +163,30 @@ impl PathCollector {
         self.current_x = p3_x;
         self.current_y = p3_y;
     }
+
+    fn move_to_pos(&mut self, x: f32, y: f32, is_font: bool) {
+        self.current_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
+        self.current_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
+        self.start_x = self.current_x;
+        self.start_y = self.current_y;
+    }
 }
 
 impl OutlineBuilder for PathCollector {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.current_x = self.tx(x);
-        self.current_y = self.ty(y);
-        self.start_x = self.current_x;
-        self.start_y = self.current_y;
+        self.move_to_pos(x, y, true);
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
-        self.add_line(x, y);
+        self.add_line(x, y, true);
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.add_quad(x1, y1, x, y);
+        self.add_quad(x1, y1, x, y, true);
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.add_cubic(x1, y1, x2, y2, x, y);
+        self.add_cubic(x1, y1, x2, y2, x, y, true);
     }
 
     fn close(&mut self) {
@@ -202,6 +211,95 @@ impl OutlineBuilder for PathCollector {
              });
              self.current_x = p3_x;
              self.current_y = p3_y;
+        }
+    }
+}
+
+impl PathCollector {
+    fn parse_svg_path(&mut self, path: &str) {
+        let mut chars = path.chars().peekable();
+        
+        // Helper to read float consuming chars
+        fn read_float(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<f32> {
+            // skip ws
+            while let Some(c) = chars.peek() {
+                 if c.is_whitespace() || *c == ',' { chars.next(); } else { break; }
+            }
+            
+            let mut s = String::new();
+            if let Some(&c) = chars.peek() {
+                if c == '-' || c == '+' { s.push(chars.next()?); }
+            }
+            while let Some(&c) = chars.peek() {
+                if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' {
+                    s.push(chars.next()?);
+                } else {
+                    break;
+                }
+            }
+            if s.is_empty() { return None; }
+            s.parse::<f32>().ok()
+        }
+
+        let mut cmd = ' ';
+        
+        loop {
+            // Skip WS
+            while let Some(c) = chars.peek() {
+                 if c.is_whitespace() || *c == ',' { chars.next(); } else { break; }
+            }
+            
+            if chars.peek().is_none() { break; }
+            
+            if let Some(&c) = chars.peek() {
+                if c.is_ascii_alphabetic() {
+                    cmd = chars.next().unwrap();
+                }
+            }
+            
+            match cmd {
+                'M' => {
+                     let x = read_float(&mut chars).unwrap_or(0.0);
+                     let y = read_float(&mut chars).unwrap_or(0.0);
+                     self.move_to_pos(x, y, false);
+                }
+                'L' => {
+                     let x = read_float(&mut chars).unwrap_or(0.0);
+                     let y = read_float(&mut chars).unwrap_or(0.0);
+                     self.add_line(x, y, false);
+                }
+                'Q' => {
+                     let x1 = read_float(&mut chars).unwrap_or(0.0);
+                     let y1 = read_float(&mut chars).unwrap_or(0.0);
+                     let x = read_float(&mut chars).unwrap_or(0.0);
+                     let y = read_float(&mut chars).unwrap_or(0.0);
+                     self.add_quad(x1, y1, x, y, false);
+                }
+                'C' => {
+                     let x1 = read_float(&mut chars).unwrap_or(0.0);
+                     let y1 = read_float(&mut chars).unwrap_or(0.0);
+                     let x2 = read_float(&mut chars).unwrap_or(0.0);
+                     let y2 = read_float(&mut chars).unwrap_or(0.0);
+                     let x = read_float(&mut chars).unwrap_or(0.0);
+                     let y = read_float(&mut chars).unwrap_or(0.0);
+                     self.add_cubic(x1, y1, x2, y2, x, y, false);
+                }
+                'Z' | 'z' => {
+                     self.close();
+                     // Z doesn't consume args, so next loop will pick up next cmd
+                     // But if there is no next cmd, we might loop forever if we enforce implicit cmd?
+                     // 'Z' typically resets implicit command to Move/Line?
+                     cmd = ' '; // Reset cmd to force explicit next command or exit
+                }
+                ' ' => {
+                    // No command yet? consumes 1 char to advance
+                     chars.next();
+                }
+                _ => {
+                    // Unknown, skip
+                    chars.next();
+                }
+            }
         }
     }
 }
@@ -269,7 +367,7 @@ pub struct GpuNode {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image
+    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape
     pub natural_content_width: f32,
 
     // --- Texture Atlas UVs ---
@@ -279,7 +377,9 @@ pub struct GpuNode {
     pub uv_max_y: f32,
     
     // --- Padding to 128 bytes ---
-    pub cpu_index: u32, pub _pad5: u32, pub _pad6: u32, // Removed pad7 due to fixed_height
+    pub cpu_index: u32, 
+    pub curve_start_index: u32, 
+    pub curve_count: u32, 
 }
 
 #[test]
@@ -316,7 +416,9 @@ impl GpuNode {
             flags: 1, // Default to 1 (Visible)
             natural_content_width: 0.0,
             uv_min_x: 0.0, uv_min_y: 0.0, uv_max_x: 0.0, uv_max_y: 0.0,
-            cpu_index: 0, _pad5: 0, _pad6: 0,
+            cpu_index: 0, 
+            curve_start_index: 0, 
+            curve_count: 0,
         }
     }
 }
@@ -344,7 +446,9 @@ pub struct CpuNode {
     
     // Text
     pub text: Option<String>,
+
     pub image_asset_id: Option<String>,
+    pub shape_data: Option<String>,
     
     // CSS Styles
     pub classes: Vec<String>,
@@ -381,6 +485,7 @@ impl CpuNode {
             
             text: None,
             image_asset_id: None,
+            shape_data: None,
             classes: Vec::new(),
             inline_styles: HashMap::new(),
             cached_texture: None,
@@ -439,6 +544,9 @@ pub struct FlexEngine {
     pub curves: Vec<GpuCurve>,
     #[wasm_bindgen(skip)]
     pub glyph_infos: Vec<GpuGlyphInfo>,
+    
+    // Curves that are permanent (e.g. from font) and should not be cleared on flatten
+    pub permanent_curve_count: usize,
 
     // Font Metrics
     pub ascender: f32,
@@ -476,6 +584,7 @@ impl FlexEngine {
             kerning_table: Vec::new(),
             curves: Vec::new(),
             glyph_infos: Vec::new(),
+            permanent_curve_count: 0,
             ascender: 0.0,
             descender: 0.0,
             line_gap: 0.0,
@@ -541,6 +650,7 @@ impl FlexEngine {
         }
         
         self.face = Some(face);
+        self.permanent_curve_count = self.curves.len();
     }
     
 
@@ -792,6 +902,9 @@ impl FlexEngine {
                  }
              };
 
+             // Clone shape data
+
+
              if let Some(id) = image_id {
                  // Check if current cache is valid
                  let mut needs_update = true;
@@ -850,6 +963,7 @@ impl FlexEngine {
 
         self.gpu_nodes.clear();
         self.characters.clear(); // Rebuild chars too since they depend on node index
+        self.curves.truncate(self.permanent_curve_count);
         
         // We need to map CPU Index -> GPU Index to fix up text/chars
         // But for now, let's just Traverse.
@@ -1022,6 +1136,21 @@ impl FlexEngine {
                      
                      gpu_node.text_start = chars_start;
                      gpu_node.text_length = chars_len;
+                }
+
+                // Shape Handling
+                if let Some(path_str) = &cpu_node.shape_data {
+                     let start_idx = self.curves.len() as u32;
+                     let mut collector = PathCollector::new(1.0, 0.0, 0.0);
+                     collector.parse_svg_path(path_str);
+                     self.curves.extend(collector.curves);
+                     let end_idx = self.curves.len() as u32;
+                     
+                     if end_idx > start_idx {
+                         gpu_node.curve_start_index = start_idx;
+                         gpu_node.curve_count = end_idx - start_idx;
+                         gpu_node.flags |= 4; // Bit 2 = Shape
+                     }
                 }
             }
         }

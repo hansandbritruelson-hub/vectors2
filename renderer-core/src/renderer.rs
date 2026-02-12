@@ -437,6 +437,70 @@ impl FlexRenderer {
                  self.rebind_all();
             }
         }
+
+        // Update Curves
+        {
+            let engine = self.engine.borrow();
+            let curve_data = engine.get_curve_buffer();
+            let curve_byte_length = curve_data.byte_length();
+            
+            if curve_byte_length > 0 {
+                 let current_curve_buffer = self.curve_buffer.as_ref().unwrap();
+                 let current_size = Reflect::get(current_curve_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+
+                 if curve_byte_length > current_size {
+                      let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+                           curve_byte_length as f64,
+                           0x0080 | 0x0008 | 0x0004
+                      ));
+                      self.curve_buffer = Some(new_buf);
+                      drop(engine);
+                      self.rebind_all();
+                 } else {
+                     drop(engine);
+                 }
+
+                 let engine = self.engine.borrow();
+                 let curve_vec = engine.get_curve_buffer().to_vec();
+                 self.device.queue().write_buffer_with_f64_and_js_value(
+                     self.curve_buffer.as_ref().unwrap(),
+                     0.0,
+                     &js_sys::Uint8Array::from(curve_vec.as_slice()).into()
+                 );
+            }
+        }
+
+        // Update Glyph Infos
+        {
+            let engine = self.engine.borrow();
+            let info_data = engine.get_glyph_info_buffer();
+            let info_byte_length = info_data.byte_length();
+            
+            if info_byte_length > 0 {
+                 let current_info_buffer = self.glyph_info_buffer.as_ref().unwrap();
+                 let current_size = Reflect::get(current_info_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+
+                 if info_byte_length > current_size {
+                      let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+                           info_byte_length as f64,
+                           0x0080 | 0x0008 | 0x0004
+                      ));
+                      self.glyph_info_buffer = Some(new_buf);
+                      drop(engine);
+                      self.rebind_all();
+                 } else {
+                     drop(engine);
+                 }
+
+                 let engine = self.engine.borrow();
+                 let info_vec = engine.get_glyph_info_buffer().to_vec();
+                 self.device.queue().write_buffer_with_f64_and_js_value(
+                     self.glyph_info_buffer.as_ref().unwrap(),
+                     0.0,
+                     &js_sys::Uint8Array::from(info_vec.as_slice()).into()
+                 );
+            }
+        }
         
         // Texture Updates (Texture Atlas)
         let mut rebind_needed = false;
