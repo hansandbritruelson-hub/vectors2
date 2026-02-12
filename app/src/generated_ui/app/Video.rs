@@ -58,7 +58,7 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
-            "padding-top".to_string(),
+            "padding-right".to_string(),
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
@@ -70,24 +70,24 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Ident("column".to_string()),
         );
         decls.insert(
-            "padding-right".to_string(),
-            renderer_core::StyleValue::Px(20f32),
-        );
-        decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.101960786f32, 0.101960786f32, 0.101960786f32, 1f32),
+        );
+        decls.insert(
+            "padding-top".to_string(),
+            renderer_core::StyleValue::Px(20f32),
         );
         e.add_style_rule(".video-editor".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "color".to_string(),
-            renderer_core::StyleValue::Color(1f32, 1f32, 1f32, 1f32),
-        );
-        decls.insert(
             "font-size".to_string(),
             renderer_core::StyleValue::Px(24f32),
+        );
+        decls.insert(
+            "color".to_string(),
+            renderer_core::StyleValue::Color(1f32, 1f32, 1f32, 1f32),
         );
         decls.insert(
             "margin-bottom".to_string(),
@@ -98,46 +98,46 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "border-radius".to_string(),
-            renderer_core::StyleValue::Px(8f32),
+            "justify-content".to_string(),
+            renderer_core::StyleValue::Ident("center".to_string()),
         );
-        decls.insert("height".to_string(), renderer_core::StyleValue::Px(300f32));
         decls.insert(
             "align-items".to_string(),
             renderer_core::StyleValue::Ident("center".to_string()),
         );
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(300f32));
         decls.insert(
-            "justify-content".to_string(),
-            renderer_core::StyleValue::Ident("center".to_string()),
+            "margin-bottom".to_string(),
+            renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.16470589f32, 0.16470589f32, 0.16470589f32, 1f32),
         );
         decls.insert(
-            "margin-bottom".to_string(),
-            renderer_core::StyleValue::Px(20f32),
+            "border-radius".to_string(),
+            renderer_core::StyleValue::Px(8f32),
         );
         e.add_style_rule(".player-placeholder".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "border-radius".to_string(),
-            renderer_core::StyleValue::Px(4f32),
-        );
-        decls.insert("height".to_string(), renderer_core::StyleValue::Px(100f32));
-        decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.2f32, 0.2f32, 0.2f32, 1f32),
         );
+        decls.insert(
+            "align-items".to_string(),
+            renderer_core::StyleValue::Ident("center".to_string()),
+        );
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(100f32));
         decls.insert(
             "justify-content".to_string(),
             renderer_core::StyleValue::Ident("center".to_string()),
         );
         decls.insert(
-            "align-items".to_string(),
-            renderer_core::StyleValue::Ident("center".to_string()),
+            "border-radius".to_string(),
+            renderer_core::StyleValue::Px(4f32),
         );
         e.add_style_rule(".timeline".to_string(), decls);
     }

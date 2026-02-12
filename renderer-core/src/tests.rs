@@ -62,7 +62,7 @@ mod tests {
             assert_eq!(flags, 1);
         }
         
-        set_visible.set(0);
+        set_visible.set(0u32);
         engine.borrow_mut().render();
         
         unsafe {

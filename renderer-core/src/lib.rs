@@ -829,6 +829,7 @@ impl FlexEngine {
         }
 
         // 4. Mark as free
+        self.cpu_nodes[node_idx] = CpuNode::new();
         self.free_nodes.push(node_id);
         self.mark_dirty();
     }
@@ -1403,6 +1404,13 @@ impl FlexEngine {
     
     pub fn mark_clean(&mut self) {
         self.dirty = false;
+    }
+
+    pub fn unload_asset(&mut self, id: &str) {
+        self.assets.remove(id);
+        // We don't necessarily clear the texture atlas cache here,
+        // because existing nodes might still be using the texture.
+        // The atlas cache uses Weak refs, and TextureHandle drop handles deallocation.
     }
 }
 

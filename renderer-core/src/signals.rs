@@ -23,6 +23,7 @@ struct Runtime {
     subscribers: HashMap<SignalId, HashSet<EffectId>>,
     effects: HashMap<EffectId, Box<dyn FnMut()>>,
     effect_scopes: HashMap<EffectId, ScopeId>, // Which scope does this effect belong to?
+    effect_dependencies: HashMap<EffectId, HashSet<SignalId>>, // What signals does this effect depend on?
     scopes: HashMap<ScopeId, ScopeData>,
     next_signal_id: SignalId,
     next_effect_id: EffectId,
@@ -48,6 +49,7 @@ impl Runtime {
             subscribers: HashMap::new(),
             effects: HashMap::new(),
             effect_scopes: HashMap::new(),
+            effect_dependencies: HashMap::new(),
             scopes: HashMap::new(),
             next_signal_id: 0,
             next_effect_id: 0,
@@ -71,9 +73,14 @@ impl Runtime {
             for effect_id in data.effects {
                 self.effects.remove(&effect_id);
                 self.effect_scopes.remove(&effect_id);
-                // Also remove from subscribers
-                for subs in self.subscribers.values_mut() {
-                    subs.remove(&effect_id);
+                
+                // Optimized subscriber cleanup
+                if let Some(deps) = self.effect_dependencies.remove(&effect_id) {
+                    for signal_id in deps {
+                        if let Some(subs) = self.subscribers.get_mut(&signal_id) {
+                            subs.remove(&effect_id);
+                        }
+                    }
                 }
             }
 
@@ -228,6 +235,7 @@ impl<T: 'static + Clone> ReadSignal<T> {
             // Dependency Tracking: If we are inside an effect, record this signal as a dependency
             if let Some(effect_id) = rt.current_effect {
                 rt.subscribers.entry(self.id).or_default().insert(effect_id);
+                rt.effect_dependencies.entry(effect_id).or_default().insert(self.id);
             }
 
             // Return the value
@@ -320,7 +328,19 @@ fn run_effect(id: EffectId) {
             (prev_e, prev_s, sid)
         });
 
-        // 3. Run it
+        // 3. Clear existing dependencies for this effect (it will re-track them during execution)
+        RUNTIME.with(|rt| {
+            let mut rt = rt.borrow_mut();
+            if let Some(deps) = rt.effect_dependencies.remove(&id) {
+                for signal_id in deps {
+                    if let Some(subs) = rt.subscribers.get_mut(&signal_id) {
+                        subs.remove(&id);
+                    }
+                }
+            }
+        });
+
+        // 4. Run it
         f();
 
         // 4. Restore context and put effect back
@@ -377,6 +397,50 @@ where
 {
     fn eq(&self, other: &Rhs) -> bool {
         self.get() == *other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::Rc;
+    use std::cell::RefCell;
+
+    #[test]
+    fn test_stale_subscription_leak() {
+        let (read_cond, write_cond) = create_signal(true);
+        let (read_a, write_a) = create_signal(1i32);
+        let (read_b, write_b) = create_signal(10i32);
+        
+        let call_count = Rc::new(RefCell::new(0));
+        let cc = call_count.clone();
+        
+        create_effect(move || {
+            *cc.borrow_mut() += 1;
+            if read_cond.get() {
+                read_a.get();
+            } else {
+                read_b.get();
+            }
+        });
+        
+        assert_eq!(*call_count.borrow(), 1);
+        
+        // Update A (should trigger)
+        write_a.set(2i32);
+        assert_eq!(*call_count.borrow(), 2);
+        
+        // Switch condition
+        write_cond.set(false);
+        assert_eq!(*call_count.borrow(), 3);
+        
+        // Update A again (should NOT trigger anymore because it's no longer read)
+        write_a.set(3i32);
+        assert_eq!(*call_count.borrow(), 3);
+        
+        // Update B (should trigger now)
+        write_b.set(11i32);
+        assert_eq!(*call_count.borrow(), 4);
     }
 }
 
