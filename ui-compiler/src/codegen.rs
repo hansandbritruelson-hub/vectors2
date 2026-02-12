@@ -321,7 +321,79 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
 }
 
 fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u32) -> TokenStream {
-    // Check for Component (PascalCase)
+    // Check for special directives first (v-if, v-for)
+    let mut v_if = None;
+    let mut v_for = None;
+    for attr in &el.attributes {
+        if attr.name == "v-if" {
+            v_if = Some(attr.value.clone());
+        } else if attr.name == "v-for" {
+            v_for = Some(attr.value.clone());
+        }
+    }
+
+    if let Some(condition) = v_if {
+        // Sanitize condition for Rust: replace single quotes with double quotes
+        let sanitized_condition = condition.replace('\'', "\"");
+        let condition_expr: syn::Expr = syn::parse_str(&sanitized_condition).unwrap_or_else(|_| syn::parse_str("true").unwrap());
+        
+        let mut inner_el = el.clone();
+        inner_el.attributes.retain(|a| a.name != "v-if");
+        
+        let parent_token = if let Some(p) = parent_name {
+            let p_ident = format_ident!("{}", p);
+            quote! { #p_ident }
+        } else {
+            quote! { parent.unwrap_or(0) }
+        };
+
+        // We build the inner element code BUT we need to make sure the closure captures the correct logic.
+        // The previous implementation was parsing condition_expr outside the memoized closure,
+        // which is fine, but we need to ensure the expression is evaluated INSIDE the closure for reactivity.
+        
+        let inner_code = generate_element_code(&inner_el, None, id_gen);
+
+        return quote! {
+            {
+                let engine_c = engine.clone();
+                mount_if(engine.clone(), #parent_token, create_memo(
+                    move || (#condition_expr).to_bool()
+                ), move || {
+                    let engine = engine_c.clone();
+                    #inner_code
+                });
+                0 
+            }
+        };
+    }
+
+    if let Some(v_for_expr) = v_for {
+        let mut parts = v_for_expr.splitn(2, " in ");
+        let item = parts.next().unwrap().trim();
+        let collection = parts.next().unwrap().trim();
+        let item_ident = format_ident!("{}", item);
+        let collection_ident = format_ident!("{}", collection);
+
+        let parent_token = if let Some(p) = parent_name {
+            let p_ident = format_ident!("{}", p);
+            quote! { #p_ident }
+        } else {
+            quote! { 0 } 
+        };
+
+        let builder = generate_element_builder(el, id_gen);
+
+        return quote! {
+            {
+                mount_list(engine.clone(), #parent_token, #collection_ident, |item| item.id.clone(), move |#item_ident| {
+                    #builder
+                });
+                0 
+            }
+        };
+    }
+
+    // Now check for Component (PascalCase)
     let is_component = el.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
 
     if is_component {
@@ -332,12 +404,13 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             let p_ident = format_ident!("{}", p);
             quote! { Some(#p_ident) }
         } else {
-            quote! { None } // Or passed 'parent' if explicit
+            quote! { None } 
         };
         
         // Props Construction
         let mut field_assignments = Vec::new();
         for attr in &el.attributes {
+            if attr.name == "v-if" || attr.name == "v-for" { continue; }
             let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
              if attr.is_dynamic {
                  let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
@@ -358,79 +431,6 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             )
         };
     }
-
-    let mut v_if = None;
-    let mut v_for = None;
-    for attr in &el.attributes {
-        if attr.name == "v-if" {
-            v_if = Some(attr.value.clone());
-        } else if attr.name == "v-for" {
-            v_for = Some(attr.value.clone());
-        }
-    }
-
-    if let Some(condition) = v_if {
-        let condition_expr: syn::Expr = syn::parse_str(&condition).unwrap_or_else(|_| syn::parse_str("true").unwrap());
-        // Remove v-if and recurse
-        let mut inner_el = el.clone();
-        inner_el.attributes.retain(|a| a.name != "v-if");
-        
-        let parent_token = if let Some(p) = parent_name {
-            let p_ident = format_ident!("{}", p);
-            quote! { #p_ident }
-        } else {
-            quote! { parent.unwrap_or(0) }
-        };
-
-        // We need the inner code to execute and return the ID.
-        // But generate_element_code might expect a parent.
-        // We pass None to inner to indicate it should be returned and then moved?
-        // Actually, mount_if template executes in a closure.
-        // We'll pass Some(0) as temporary parent, insert_after_node will fix it.
-        let inner_code = generate_element_code(&inner_el, None, id_gen);
-
-        return quote! {
-            {
-                let engine_c = engine.clone();
-                mount_if(engine.clone(), #parent_token, create_memo({
-                    let val = #condition_expr.clone();
-                    move || val.to_bool()
-                }), move || {
-                    let engine = engine_c.clone();
-                    #inner_code
-                });
-                0 // mount_if doesn't return the ID immediately, it's dynamic
-            }
-        };
-    }
-
-    if let Some(v_for_expr) = v_for {
-        let mut parts = v_for_expr.splitn(2, " in ");
-        let item = parts.next().unwrap().trim();
-        let collection = parts.next().unwrap().trim();
-        let item_ident = format_ident!("{}", item);
-        let collection_ident = format_ident!("{}", collection);
-
-        let parent_token = if let Some(p) = parent_name {
-            let p_ident = format_ident!("{}", p);
-            quote! { #p_ident }
-        } else {
-            // v-for must have a parent in mount_list
-            quote! { 0 } 
-        };
-
-        // We need to generate the builder for the element *without* the v-for attribute
-        let builder = generate_element_builder(el, id_gen);
-
-        quote! {
-            {
-                mount_list(engine.clone(), #parent_token, #collection_ident, |item| item.id.clone(), move |#item_ident| {
-                    #builder
-                });
-                0 
-            }
-        }
-    } else {
         *id_gen += 1;
         let node_var = format_ident!("node_{}", id_gen);
         let parent_token = if let Some(p) = parent_name {
@@ -547,7 +547,6 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             }
             #node_var
         }
-    }
 }
 
 fn style_value_to_tokens(val: &StyleValue) -> TokenStream {

@@ -84,11 +84,18 @@ pub fn create_memo<T: 'static + Clone, F: Fn() -> T + 'static>(f: F) -> ReadSign
 
 // --- Signal Accessors ---
 
-#[derive(Clone, Copy)]
 pub struct ReadSignal<T> {
     pub id: SignalId,
     _marker: std::marker::PhantomData<T>,
 }
+
+impl<T> Clone for ReadSignal<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for ReadSignal<T> {}
 
 impl<T: 'static + Clone> ReadSignal<T> {
     pub fn get(&self) -> T {
@@ -110,11 +117,18 @@ impl<T: 'static + Clone> ReadSignal<T> {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct WriteSignal<T> {
     pub id: SignalId,
     _marker: std::marker::PhantomData<T>,
 }
+
+impl<T> Clone for WriteSignal<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for WriteSignal<T> {}
 
 impl<T: 'static + Clone> WriteSignal<T> {
     pub fn set(&self, new_value: T) {
@@ -225,3 +239,14 @@ impl ToBool for bool {
 impl ToBool for ReadSignal<bool> {
     fn to_bool(&self) -> bool { self.get() }
 }
+
+impl<T, Rhs> PartialEq<Rhs> for ReadSignal<T>
+where
+    T: PartialEq<Rhs> + Clone + 'static,
+{
+    fn eq(&self, other: &Rhs) -> bool {
+        self.get() == *other
+    }
+}
+
+
