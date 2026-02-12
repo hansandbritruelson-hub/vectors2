@@ -299,7 +299,6 @@ impl<T> Copy for WriteSignal<T> {}
 impl<T: 'static + Clone> WriteSignal<T> {
     pub fn set<U: Into<T>>(&self, new_value: U) {
         let val: T = new_value.into();
-        crate::log(&format!("Signal set: id={}", self.id));
         let effects_to_run = RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
             
@@ -381,14 +380,21 @@ fn run_effect(id: EffectId) {
         // 4. Run it
         f();
 
-        // 4. Restore context and put effect back if it hasn't been disposed
+        // 5. Restore context and put effect back
         RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
             rt.current_effect = prev_effect;
             rt.current_scope = prev_scope;
             
-            // If the effect's scope was disposed during execution, don't put it back!
-            if rt.effect_scopes.contains_key(&id) {
+            // If the effect had a scope and that scope was disposed, don't put it back.
+            // If it had NO scope, it's global and should persist.
+            let should_persist = if let Some(sid) = rt.effect_scopes.get(&id) {
+                rt.scopes.contains_key(sid)
+            } else {
+                true // Global effect
+            };
+
+            if should_persist {
                 rt.effects.insert(id, f);
             }
         });
@@ -515,5 +521,3 @@ mod tests {
         assert_eq!(sub_count, 0, "Subscribers map should be empty after scope disposal");
     }
 }
-
-
