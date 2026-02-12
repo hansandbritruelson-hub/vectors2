@@ -94,12 +94,19 @@ impl TextureAtlas {
     // Process any handles that were dropped
     pub fn process_deletions(&mut self) {
         let mut queue = self.deallocation_queue.borrow_mut();
-        if queue.is_empty() { return; }
+        if queue.is_empty() {
+             // Still purge cache if needed (though usually drain corresponds to drops)
+             self.cache.retain(|_, weak| weak.upgrade().is_some());
+             return; 
+        }
         
         for allocation in queue.drain(..) {
             self.allocator.deallocate(allocation.id);
             // crate::log(&format!("Deallocated texture region via handle drop"));
         }
+
+        // Cache Purging: remove dead weak refs
+        self.cache.retain(|_, weak| weak.upgrade().is_some());
     }
 
     pub fn allocate(&mut self, key: CacheKey, pixels: Vec<u8>) -> Option<Rc<TextureHandle>> {

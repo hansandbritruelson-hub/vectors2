@@ -186,9 +186,12 @@ where
                 engine.borrow_mut().insert_after_node(existing_id, parent, Some(last_id));
                 existing_id
             } else {
-                // Build new node
-                let element = template(item);
-                element.build_after(engine.clone(), Some(parent), Some(last_id))
+                // Build new node in a new scope
+                let (id, scope) = crate::signals::create_root(|s| {
+                    (template(item).build_after(engine.clone(), Some(parent), Some(last_id)), s)
+                });
+                engine.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
+                id
             };
             
             new_mounted.insert(key, node_id);
@@ -200,7 +203,7 @@ where
             let mut e = engine.borrow_mut();
             for (key, id) in mounted_nodes.drain() {
                 if !new_mounted.contains_key(&key) {
-                    e.remove_from_parent(id);
+                    e.delete_node_recursive(id);
                 }
             }
         }
@@ -239,14 +242,17 @@ where
         
         if is_true {
             if current.is_none() {
-                let id = template();
+                // Create in a new scope
+                let (id, scope) = crate::signals::create_root(|s| (template(), s));
+                
+                engine_clone.borrow_mut().cpu_nodes[id as usize].scope = Some(scope.id);
                 // Ensure it's correctly placed after the anchor
                 engine_clone.borrow_mut().insert_after_node(id, parent, Some(anchor_id));
                 *current = Some(id);
             }
         } else {
             if let Some(id) = current.take() {
-                engine_clone.borrow_mut().remove_from_parent(id);
+                engine_clone.borrow_mut().delete_node_recursive(id);
             }
         }
     });

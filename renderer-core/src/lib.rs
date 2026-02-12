@@ -462,6 +462,8 @@ pub struct CpuNode {
     
     // Events
     pub on_click: Option<std::rc::Rc<dyn Fn()>>,
+
+    pub scope: Option<crate::signals::ScopeId>,
 }
 
 impl CpuNode {
@@ -490,6 +492,7 @@ impl CpuNode {
             inline_styles: HashMap::new(),
             cached_texture: None,
             on_click: None,
+            scope: None,
         }
     }
 }
@@ -565,6 +568,9 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub stylesheet: StyleSheet,
 
+    #[wasm_bindgen(skip)]
+    pub free_nodes: Vec<u32>,
+
     pub dirty: bool,
 }
 
@@ -592,6 +598,7 @@ impl FlexEngine {
             texture_atlas: texture_atlas::TextureAtlas::new(2048, 2048),
             assets: HashMap::new(),
             stylesheet: StyleSheet::default(),
+            free_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -661,10 +668,18 @@ impl FlexEngine {
 
 
     pub fn add_node(&mut self, min_width: f32) -> u32 {
-        let mut node = CpuNode::new();
-        node.min_width = min_width;
-        let index = self.cpu_nodes.len() as u32;
-        self.cpu_nodes.push(node);
+        let index = if let Some(idx) = self.free_nodes.pop() {
+            let node = &mut self.cpu_nodes[idx as usize];
+            *node = CpuNode::new();
+            node.min_width = min_width;
+            idx
+        } else {
+            let mut node = CpuNode::new();
+            node.min_width = min_width;
+            let index = self.cpu_nodes.len() as u32;
+            self.cpu_nodes.push(node);
+            index
+        };
         self.mark_dirty();
         index
     }
@@ -783,13 +798,38 @@ impl FlexEngine {
         let mut curr = self.cpu_nodes[parent_idx].first_child;
         while let Some(child_idx) = curr {
             let next = self.cpu_nodes[child_idx].next_sibling;
-            self.cpu_nodes[child_idx].parent = None;
-            self.cpu_nodes[child_idx].next_sibling = None;
+            self.delete_node_recursive(child_idx as u32);
             curr = next;
         }
 
         self.cpu_nodes[parent_idx].first_child = None;
         self.cpu_nodes[parent_idx].last_child = None;
+        self.mark_dirty();
+    }
+
+    pub fn delete_node_recursive(&mut self, node_id: u32) {
+        let node_idx = node_id as usize;
+        if node_idx >= self.cpu_nodes.len() { return; }
+
+        // 1. Recurse to children
+        let mut curr = self.cpu_nodes[node_idx].first_child;
+        while let Some(child_idx) = curr {
+            let next = self.cpu_nodes[child_idx].next_sibling;
+            self.delete_node_recursive(child_idx as u32);
+            curr = next;
+        }
+
+        // 2. Unlink from parent
+        self.remove_from_parent(node_id);
+
+        // 3. Dispose of Signal Scope
+        if let Some(scope_id) = self.cpu_nodes[node_idx].scope {
+            crate::signals::Scope { id: scope_id }.dispose();
+            self.cpu_nodes[node_idx].scope = None;
+        }
+
+        // 4. Mark as free
+        self.free_nodes.push(node_id);
         self.mark_dirty();
     }
 }

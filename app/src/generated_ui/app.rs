@@ -84,11 +84,7 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
-        );
-        decls.insert(
-            "width".to_string(),
+            "height".to_string(),
             renderer_core::StyleValue::Percent(100f32),
         );
         decls.insert(
@@ -96,8 +92,12 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Color(0.07058824f32, 0.07058824f32, 0.07058824f32, 1f32),
         );
         decls.insert(
-            "height".to_string(),
+            "width".to_string(),
             renderer_core::StyleValue::Percent(100f32),
+        );
+        decls.insert(
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
         );
         e.add_style_rule(".container".to_string(), decls);
     }

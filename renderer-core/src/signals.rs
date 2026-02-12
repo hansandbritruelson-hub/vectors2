@@ -18,22 +18,70 @@ pub struct Signal<T> {
 
 struct Runtime {
     current_effect: Option<EffectId>,
-    signals: HashMap<SignalId, Box<dyn Any>>, // Stores the *value* of the signal
-    subscribers: HashMap<SignalId, HashSet<EffectId>>,  // Who is listening to this signal?
-    effects: HashMap<EffectId, Box<dyn FnMut()>>,       // The actual closure of the effect
+    current_scope: Option<ScopeId>,
+    signals: HashMap<SignalId, Box<dyn Any>>,
+    subscribers: HashMap<SignalId, HashSet<EffectId>>,
+    effects: HashMap<EffectId, Box<dyn FnMut()>>,
+    effect_scopes: HashMap<EffectId, ScopeId>, // Which scope does this effect belong to?
+    scopes: HashMap<ScopeId, ScopeData>,
     next_signal_id: SignalId,
     next_effect_id: EffectId,
+    next_scope_id: ScopeId,
+}
+
+pub type ScopeId = usize;
+
+struct ScopeData {
+    signals: Vec<SignalId>,
+    effects: Vec<EffectId>,
+    sub_scopes: Vec<ScopeId>,
+    parent: Option<ScopeId>,
+    cleanups: Vec<Box<dyn FnOnce()>>,
 }
 
 impl Runtime {
     fn new() -> Self {
         Self {
             current_effect: None,
+            current_scope: None,
             signals: HashMap::new(),
             subscribers: HashMap::new(),
             effects: HashMap::new(),
+            effect_scopes: HashMap::new(),
+            scopes: HashMap::new(),
             next_signal_id: 0,
             next_effect_id: 0,
+            next_scope_id: 0,
+        }
+    }
+
+    fn dispose_scope(&mut self, id: ScopeId) {
+        if let Some(data) = self.scopes.remove(&id) {
+            // 1. Dispose sub-scopes
+            for sub_id in data.sub_scopes {
+                self.dispose_scope(sub_id);
+            }
+
+            // 2. Run cleanups
+            for cleanup in data.cleanups {
+                cleanup();
+            }
+
+            // 3. Remove effects
+            for effect_id in data.effects {
+                self.effects.remove(&effect_id);
+                self.effect_scopes.remove(&effect_id);
+                // Also remove from subscribers
+                for subs in self.subscribers.values_mut() {
+                    subs.remove(&effect_id);
+                }
+            }
+
+            // 4. Remove signals
+            for signal_id in data.signals {
+                self.signals.remove(&signal_id);
+                self.subscribers.remove(&signal_id);
+            }
         }
     }
 }
@@ -50,6 +98,13 @@ pub fn create_signal<T: 'static + Clone>(initial_value: T) -> (ReadSignal<T>, Wr
         let id = rt.next_signal_id;
         rt.next_signal_id += 1;
         rt.signals.insert(id, Box::new(initial_value));
+        
+        if let Some(scope_id) = rt.current_scope {
+            if let Some(scope) = rt.scopes.get_mut(&scope_id) {
+                scope.signals.push(id);
+            }
+        }
+        
         id
     });
 
@@ -67,12 +122,80 @@ where
         let mut rt = rt.borrow_mut();
         let id = rt.next_effect_id;
         rt.next_effect_id += 1;
-        // Don't insert yet, run_effect handles insertion
         rt.effects.insert(id, Box::new(effect_fn)); 
+
+        if let Some(scope_id) = rt.current_scope {
+            if let Some(scope) = rt.scopes.get_mut(&scope_id) {
+                scope.effects.push(id);
+                rt.effect_scopes.insert(id, scope_id);
+            }
+        }
+
         id
     });
 
     run_effect(id);
+}
+
+pub fn create_root<F, T>(f: F) -> T 
+where F: FnOnce(Scope) -> T
+{
+    let (id, parent) = RUNTIME.with(|rt| {
+        let mut rt = rt.borrow_mut();
+        let id = rt.next_scope_id;
+        rt.next_scope_id += 1;
+        
+        let parent = rt.current_scope;
+        rt.scopes.insert(id, ScopeData {
+            signals: Vec::new(),
+            effects: Vec::new(),
+            sub_scopes: Vec::new(),
+            parent,
+            cleanups: Vec::new(),
+        });
+        
+        if let Some(p) = parent {
+            if let Some(p_data) = rt.scopes.get_mut(&p) {
+                p_data.sub_scopes.push(id);
+            }
+        }
+        
+        rt.current_scope = Some(id);
+        (id, parent)
+    });
+
+    let result = f(Scope { id });
+
+    RUNTIME.with(|rt| {
+        rt.borrow_mut().current_scope = parent;
+    });
+
+    result
+}
+
+pub struct Scope {
+    pub id: ScopeId,
+}
+
+impl Scope {
+    pub fn dispose(self) {
+        RUNTIME.with(|rt| {
+            rt.borrow_mut().dispose_scope(self.id);
+        });
+    }
+}
+
+pub fn on_cleanup<F>(f: F) 
+where F: FnOnce() + 'static
+{
+    RUNTIME.with(|rt| {
+        let mut rt = rt.borrow_mut();
+        if let Some(scope_id) = rt.current_scope {
+            if let Some(scope) = rt.scopes.get_mut(&scope_id) {
+                scope.cleanups.push(Box::new(f));
+            }
+        }
+    });
 }
 pub fn create_memo<T: 'static + Clone, F: Fn() -> T + 'static>(f: F) -> ReadSignal<T> {
     let (read, write) = create_signal(f());
@@ -184,12 +307,17 @@ fn run_effect(id: EffectId) {
     });
 
     if let Some(mut f) = effect_opt {
-        // 2. Set current_effect context
-        let prev_effect = RUNTIME.with(|rt| {
+        // 2. Set current_effect context and scope context
+        let (prev_effect, prev_scope, _scope_id) = RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
-            let prev = rt.current_effect;
+            let prev_e = rt.current_effect;
+            let prev_s = rt.current_scope;
+            let sid = rt.effect_scopes.get(&id).cloned();
             rt.current_effect = Some(id);
-            prev
+            if let Some(sid) = sid {
+                rt.current_scope = Some(sid);
+            }
+            (prev_e, prev_s, sid)
         });
 
         // 3. Run it
@@ -199,6 +327,7 @@ fn run_effect(id: EffectId) {
         RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
             rt.current_effect = prev_effect;
+            rt.current_scope = prev_scope;
             rt.effects.insert(id, f);
         });
     }

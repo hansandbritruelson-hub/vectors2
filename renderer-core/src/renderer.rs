@@ -400,6 +400,9 @@ impl FlexRenderer {
             
             if nodes_byte_length > nodes_buffer_size {
                  // log(&format!("Resizing nodes_buffer from {} to {}", nodes_buffer_size, nodes_byte_length));
+                 if let Some(old) = &self.nodes_buffer {
+                     old.destroy();
+                 }
                  let new_nodes_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
                       nodes_byte_length as f64,
                       0x0080 | 0x0008 | 0x0004
@@ -427,6 +430,9 @@ impl FlexRenderer {
             
             if char_count > 0 {
                  let chars_vec = engine.get_characters_buffer().to_vec();
+                 if let Some(old) = &self.characters_buffer {
+                     old.destroy();
+                 }
                  let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
                       (if chars_byte_length == 0 { 4 } else { chars_byte_length }) as f64,
                       0x0080 | 0x0008 | 0x0004
@@ -744,8 +750,17 @@ impl FlexRenderer {
             for i in 0..count {
                 let offset = i * char_size;
                 if offset + char_size > vec.len() { break; }
-                let char_ptr = unsafe { vec.as_ptr().add(offset) } as *const crate::Character;
-                let c = unsafe { &*char_ptr };
+                
+                // Safe alignment handling: copy to stack-aligned struct
+                let mut c = std::mem::MaybeUninit::<crate::Character>::uninit();
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        vec.as_ptr().add(offset),
+                        c.as_mut_ptr() as *mut u8,
+                        char_size
+                    );
+                }
+                let c = unsafe { c.assume_init() };
                 
                 if c.value != 0 {
                     // log(&format!("--- DEBUG: Node {} text: {:?} ---", gpu_idx, cpu_node.text));
@@ -790,8 +805,17 @@ impl FlexRenderer {
             let mut gpu_nodes = Vec::with_capacity(count);
             for i in 0..count {
                 let offset = i * node_size;
-                let node_ptr = unsafe { vec.as_ptr().add(offset) } as *const crate::GpuNode;
-                let node = unsafe { (*node_ptr).clone() };
+                
+                let mut node = std::mem::MaybeUninit::<crate::GpuNode>::uninit();
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        vec.as_ptr().add(offset),
+                        node.as_mut_ptr() as *mut u8,
+                        node_size
+                    );
+                }
+                let node = unsafe { node.assume_init() };
+                
                 gpu_nodes.push(node);
             }
             
