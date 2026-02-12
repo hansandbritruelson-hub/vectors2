@@ -209,6 +209,49 @@ where
     });
 }
 
+/// mount_if handles conditional rendering (v-if).
+pub fn mount_if<F>(
+    engine: Rc<RefCell<FlexEngine>>, 
+    parent: u32, 
+    condition: ReadSignal<bool>, 
+    template: F
+) 
+where 
+    F: Fn() -> u32 + 'static
+{
+    // Anchor node marks the position for the conditional content.
+    let anchor_id = {
+        let mut e = engine.borrow_mut();
+        let id = e.add_node(0.0);
+        e.set_fixed_width(id, 0.0);
+        e.set_parent(id, parent);
+        // Hide anchor from rendering
+        e.update_node_flags(id, 0); 
+        id
+    };
+
+    let mounted_id = Rc::new(RefCell::new(None));
+
+    let engine_clone = engine.clone();
+    create_effect(move || {
+        let is_true = condition.get();
+        let mut current = mounted_id.borrow_mut();
+        
+        if is_true {
+            if current.is_none() {
+                let id = template();
+                // Ensure it's correctly placed after the anchor
+                engine_clone.borrow_mut().insert_after_node(id, parent, Some(anchor_id));
+                *current = Some(id);
+            }
+        } else {
+            if let Some(id) = current.take() {
+                engine_clone.borrow_mut().remove_from_parent(id);
+            }
+        }
+    });
+}
+
 // --- UI Construction ---
 
 // --- UI Construction ---

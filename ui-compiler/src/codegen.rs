@@ -86,8 +86,17 @@ pub fn generate_rust(template: &Template) -> String {
     };
 
     let mut root_nodes = Vec::new();
-    for node in &template.root {
-        root_nodes.push(generate_node(node, None, &mut id_gen));
+    if template.root.is_empty() {
+        root_nodes.push(quote! { 0 });
+    } else {
+        for (i, node) in template.root.iter().enumerate() {
+            let code = generate_node(node, None, &mut id_gen);
+            if i == template.root.len() - 1 {
+                root_nodes.push(code);
+            } else {
+                root_nodes.push(quote! { #code; });
+            }
+        }
     }
     
     let expanded = quote! {
@@ -97,8 +106,8 @@ pub fn generate_rust(template: &Template) -> String {
         #![allow(unused_variables)]
 
         use renderer_core::FlexEngine;
-        use renderer_core::ui::{div, text, mount_list, Element};
-        use renderer_core::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString};
+        use renderer_core::ui::{div, text, mount_list, mount_if, Element};
+        use renderer_core::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString, ToBool};
         use std::rc::Rc;
         use std::cell::RefCell;
 
@@ -112,7 +121,7 @@ pub fn generate_rust(template: &Template) -> String {
         #props_def
 
         #[allow(unused_variables)]
-        pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, #build_args) {
+        pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, #build_args) -> u32 {
             // Register Styles
             register_styles(engine.clone());
 
@@ -120,9 +129,10 @@ pub fn generate_rust(template: &Template) -> String {
             #(#function_stmts)*
 
             // UI Construction
-            {
+            let root_id = {
                 #(#root_nodes)*
-            }
+            };
+            root_id
         }
 
         fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
@@ -345,15 +355,53 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 self::#component_name::Props {
                     #(#field_assignments),*
                 }
-            );
+            )
         };
     }
 
+    let mut v_if = None;
     let mut v_for = None;
     for attr in &el.attributes {
-        if attr.name == "v-for" {
+        if attr.name == "v-if" {
+            v_if = Some(attr.value.clone());
+        } else if attr.name == "v-for" {
             v_for = Some(attr.value.clone());
         }
+    }
+
+    if let Some(condition) = v_if {
+        let condition_expr: syn::Expr = syn::parse_str(&condition).unwrap_or_else(|_| syn::parse_str("true").unwrap());
+        // Remove v-if and recurse
+        let mut inner_el = el.clone();
+        inner_el.attributes.retain(|a| a.name != "v-if");
+        
+        let parent_token = if let Some(p) = parent_name {
+            let p_ident = format_ident!("{}", p);
+            quote! { #p_ident }
+        } else {
+            quote! { parent.unwrap_or(0) }
+        };
+
+        // We need the inner code to execute and return the ID.
+        // But generate_element_code might expect a parent.
+        // We pass None to inner to indicate it should be returned and then moved?
+        // Actually, mount_if template executes in a closure.
+        // We'll pass Some(0) as temporary parent, insert_after_node will fix it.
+        let inner_code = generate_element_code(&inner_el, None, id_gen);
+
+        return quote! {
+            {
+                let engine_c = engine.clone();
+                mount_if(engine.clone(), #parent_token, create_memo({
+                    let val = #condition_expr.clone();
+                    move || val.to_bool()
+                }), move || {
+                    let engine = engine_c.clone();
+                    #inner_code
+                });
+                0 // mount_if doesn't return the ID immediately, it's dynamic
+            }
+        };
     }
 
     if let Some(v_for_expr) = v_for {
@@ -375,9 +423,12 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         let builder = generate_element_builder(el, id_gen);
 
         quote! {
-            mount_list(engine.clone(), #parent_token, #collection_ident, |item| item.id.clone(), move |#item_ident| {
-                #builder
-            });
+            {
+                mount_list(engine.clone(), #parent_token, #collection_ident, |item| item.id.clone(), move |#item_ident| {
+                    #builder
+                });
+                0 
+            }
         }
     } else {
         *id_gen += 1;
@@ -485,7 +536,8 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         // We will loop children HERE in 'generate_element_code'.
         
         let child_codes: Vec<TokenStream> = el.children.iter().map(|c| {
-            generate_node(c, Some(&node_var.to_string()), id_gen)
+            let code = generate_node(c, Some(&node_var.to_string()), id_gen);
+            quote! { #code; }
         }).collect();
 
         quote! {
@@ -493,6 +545,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             {
                 #(#child_codes)*
             }
+            #node_var
         }
     }
 }

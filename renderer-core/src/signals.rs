@@ -213,3 +213,15 @@ impl ToReactiveString for i32 {
 impl ToReactiveString for f32 {
     fn to_reactive_string(&self) -> String { self.to_string() }
 }
+
+pub trait ToBool {
+    fn to_bool(&self) -> bool;
+}
+
+impl ToBool for bool {
+    fn to_bool(&self) -> bool { *self }
+}
+
+impl ToBool for ReadSignal<bool> {
+    fn to_bool(&self) -> bool { self.get() }
+}

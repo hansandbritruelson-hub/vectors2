@@ -1,6 +1,6 @@
 <template>
   <div class="main">
-    <div class="sidebar" @click="set_count.set(count.get() + 1)">
+    <div v-if="show_sidebar" class="sidebar" @click="set_show_sidebar.set(false)">
       <div class="count-text">Count: {{ count }}</div>
       <div :text="sidebar_content"></div>
       <div class="icon" image="paintbrush.svg"></div>
@@ -39,6 +39,7 @@
     mod TestComponent;
     let (sidebar_content, set_sidebar_content) = crate::signals::create_signal("SIDEBAR\n(Reactive)".to_string());
     let (count, set_count) = crate::signals::create_signal(0);
+    let (show_sidebar, set_show_sidebar) = crate::signals::create_signal(true);
     
     #[derive(Clone)]
     struct User { id: String, name: String }
@@ -59,12 +60,14 @@
             set_sidebar_content.set(format!("SIDEBAR\nTick: {}", count));
             
             if count % 2 == 0 {
+                set_show_sidebar.set(true);
                 set_users.set(vec![
                     User { id: "1".into(), name: "Alice".into() },
                     User { id: "3".into(), name: format!("New User {}", count) },
                     User { id: "2".into(), name: "Bob (Moved)".into() },
                 ]);
             } else {
+                set_show_sidebar.set(count % 4 != 1); // Toggle every now and then
                 set_users.set(vec![
                     User { id: "2".into(), name: "Bob".into() },
                     User { id: "1".into(), name: "Alice".into() },
