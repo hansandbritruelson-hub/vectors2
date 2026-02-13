@@ -76,6 +76,18 @@ async function run() {
         await renderer.handle_click(x, y);
     });
 
+    window.addEventListener('click', (e) => {
+        if (renderer) {
+            renderer.handle_click(e.clientX, e.clientY);
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (renderer) {
+            renderer.handle_mousemove(e.clientX, e.clientY);
+        }
+    });
+
     window.addEventListener('keydown', (e) => {
         if (!renderer) return;
         renderer.handle_keydown(e.key);

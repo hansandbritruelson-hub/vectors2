@@ -79,9 +79,10 @@ struct Node {
     box_shadow_spread: f32,
     box_shadow_color: u32,
 
-    _pad_style_0: u32,
-    _pad_style_1: u32,
-    _pad_style_2: u32,
+    text_color_r: f32,
+    text_color_g: f32,
+    text_color_b: f32,
+    text_color_a: f32,
 };
 
 struct Character {
@@ -494,166 +495,188 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].outline_color_right = 0u;
     nodes[id].outline_color_bottom = 0u;
     nodes[id].outline_color_left = 0u;
+    nodes[id].box_shadow_spread = 0.0;
+    nodes[id].box_shadow_color = 0u;
+    nodes[id].text_color_r = 1.0;
+    nodes[id].text_color_g = 1.0;
+    nodes[id].text_color_b = 1.0;
+    nodes[id].text_color_a = 1.0;
 
+    let is_hovered = (nodes[id].flags & 16u) != 0u;
     let list_offset = nodes[id].class_data_offset;
     let count = node_class_list[list_offset];
 
     for (var c = 0u; c < count; c = c + 1u) {
         var pos = node_class_list[list_offset + 1u + c]; // offset into class_defs
+        var in_hover = false;
         loop {
             let prop_id = class_defs[pos];
             if (prop_id == CTRL_END) { break; }
+            if (prop_id == CTRL_HOVER_START) {
+                in_hover = true;
+                pos = pos + 1u;
+                continue;
+            }
             pos = pos + 1u;
+
+            let apply = (in_hover && is_hovered) || (!in_hover);
 
             switch (prop_id) {
                 case PROP_BACKGROUND_COLOR_RGBA: {
-                    nodes[id].color_r = bitcast<f32>(class_defs[pos]);
-                    nodes[id].color_g = bitcast<f32>(class_defs[pos + 1u]);
-                    nodes[id].color_b = bitcast<f32>(class_defs[pos + 2u]);
-                    nodes[id].color_a = bitcast<f32>(class_defs[pos + 3u]);
+                    if (apply) {
+                        nodes[id].color_r = bitcast<f32>(class_defs[pos]);
+                        nodes[id].color_g = bitcast<f32>(class_defs[pos + 1u]);
+                        nodes[id].color_b = bitcast<f32>(class_defs[pos + 2u]);
+                        nodes[id].color_a = bitcast<f32>(class_defs[pos + 3u]);
+                    }
                     pos = pos + 4u;
                 }
                 case PROP_WIDTH: {
-                    nodes[id].fixed_width = bitcast<f32>(class_defs[pos]);
-                    // class_defs[pos+1] = unit (ignored for now, assume px)
+                    if (apply) { nodes[id].fixed_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_HEIGHT: {
-                    nodes[id].fixed_height = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].fixed_height = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_FLEX_DIRECTION: {
-                    nodes[id].flex_direction = class_defs[pos];
+                    if (apply) { nodes[id].flex_direction = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_POSITION_MODE: {
-                    nodes[id].position_mode = class_defs[pos];
+                    if (apply) { nodes[id].position_mode = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_TOP: {
-                    nodes[id].top_offset = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].top_offset = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_LEFT: {
-                    nodes[id].left_offset = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].left_offset = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_Z_INDEX: {
-                    nodes[id].z_index = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].z_index = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 1u;
                 }
                 case PROP_PADDING_TOP: {
-                    nodes[id].padding_top = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].padding_top = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_RIGHT: {
-                    nodes[id].padding_right = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].padding_right = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_BOTTOM: {
-                    nodes[id].padding_bottom = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].padding_bottom = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_LEFT: {
-                    nodes[id].padding_left = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].padding_left = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_TOP: {
-                    nodes[id].margin_top = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].margin_top = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_RIGHT: {
-                    nodes[id].margin_right = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].margin_right = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_BOTTOM: {
-                    nodes[id].margin_bottom = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].margin_bottom = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_LEFT: {
-                    nodes[id].margin_left = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].margin_left = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_TOP_WIDTH: {
-                    nodes[id].border_top_width = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].border_top_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_RIGHT_WIDTH: {
-                    nodes[id].border_right_width = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].border_right_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_BOTTOM_WIDTH: {
-                    nodes[id].border_bottom_width = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].border_bottom_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_LEFT_WIDTH: {
-                    nodes[id].border_left_width = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].border_left_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_COLOR_TOP: {
-                    nodes[id].border_color_top = class_defs[pos];
+                    if (apply) { nodes[id].border_color_top = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_BORDER_COLOR_RIGHT: {
-                    nodes[id].border_color_right = class_defs[pos];
+                    if (apply) { nodes[id].border_color_right = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_BORDER_COLOR_BOTTOM: {
-                    nodes[id].border_color_bottom = class_defs[pos];
+                    if (apply) { nodes[id].border_color_bottom = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_BORDER_COLOR_LEFT: {
-                    nodes[id].border_color_left = class_defs[pos];
+                    if (apply) { nodes[id].border_color_left = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_OUTLINE_WIDTH: {
-                    nodes[id].outline_width = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].outline_width = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_OUTLINE_OFFSET: {
-                    nodes[id].outline_offset = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].outline_offset = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_OUTLINE_COLOR_TOP: {
-                    nodes[id].outline_color_top = class_defs[pos];
+                    if (apply) { nodes[id].outline_color_top = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_OUTLINE_COLOR_RIGHT: {
-                    nodes[id].outline_color_right = class_defs[pos];
+                    if (apply) { nodes[id].outline_color_right = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_OUTLINE_COLOR_BOTTOM: {
-                    nodes[id].outline_color_bottom = class_defs[pos];
+                    if (apply) { nodes[id].outline_color_bottom = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_OUTLINE_COLOR_LEFT: {
-                    nodes[id].outline_color_left = class_defs[pos];
+                    if (apply) { nodes[id].outline_color_left = class_defs[pos]; }
                     pos = pos + 1u;
                 }
                 case PROP_BOX_SHADOW_H_OFFSET: {
-                    nodes[id].box_shadow_h_offset = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].box_shadow_h_offset = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_V_OFFSET: {
-                    nodes[id].box_shadow_v_offset = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].box_shadow_v_offset = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_BLUR: {
-                    nodes[id].box_shadow_blur = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].box_shadow_blur = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_SPREAD: {
-                    nodes[id].box_shadow_spread = bitcast<f32>(class_defs[pos]);
+                    if (apply) { nodes[id].box_shadow_spread = bitcast<f32>(class_defs[pos]); }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_COLOR: {
-                    nodes[id].box_shadow_color = class_defs[pos];
+                    if (apply) { nodes[id].box_shadow_color = class_defs[pos]; }
                     pos = pos + 1u;
                 }
-                default: {
-                    // Unknown property — skip 1 u32 and hope for the best
-                    pos = pos + 1u;
+                case PROP_TEXT_COLOR_RGBA: {
+                    if (apply) {
+                        nodes[id].text_color_r = bitcast<f32>(class_defs[pos]);
+                        nodes[id].text_color_g = bitcast<f32>(class_defs[pos + 1u]);
+                        nodes[id].text_color_b = bitcast<f32>(class_defs[pos + 2u]);
+                        nodes[id].text_color_a = bitcast<f32>(class_defs[pos + 3u]);
+                    }
+                    pos = pos + 4u;
                 }
+                default: { break; }
             }
         }
     }

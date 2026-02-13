@@ -46,8 +46,8 @@
   margin-bottom: 10px;
 }
 .my-input {
-  background-color: #333;
-  color: #fff;
+  background-color: #232020ff;
+  color: #ffffff;
   padding: 5px 10px;
   width: 200px;
   border-radius: 4px;

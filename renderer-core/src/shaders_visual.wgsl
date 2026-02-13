@@ -79,9 +79,10 @@ struct Node {
     box_shadow_spread: f32,
     box_shadow_color: u32,
 
-    _pad_style_0: u32,
-    _pad_style_1: u32,
-    _pad_style_2: u32,
+    text_color_r: f32,
+    text_color_g: f32,
+    text_color_b: f32,
+    text_color_a: f32,
 };
 
 struct Character {
@@ -327,7 +328,7 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
 
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
-    out.color = vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red Text (Debug Visibility)
+    out.color = vec4<f32>(node.text_color_r, node.text_color_g, node.text_color_b, node.text_color_a);
     out.local_pos = corner - vec2(1.0, 1.0);
     out.glyph_index = char.glyph_index;
     out.flags = 0u; // Text typically doesn't use these flags in FS, but be safe

@@ -82,10 +82,14 @@ box_shadow_blur = 33
 box_shadow_spread = 34
 # box_shadow_color = 35        →  [packed_rgba:u32]
 box_shadow_color = 35
+# text_color_rgba = 36         →  [r:f32] [g:f32] [b:f32] [a:f32]
+text_color_rgba = 36
 
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer
 end = 4294967295
+# CTRL_HOVER_START delineates hover styles within a class
+hover_start = 4294967294
 
 [units]
 px = 1

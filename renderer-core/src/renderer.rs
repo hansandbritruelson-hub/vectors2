@@ -63,6 +63,8 @@ pub struct FlexRenderer {
     
     bind_group_layout_compute: Option<GpuBindGroupLayout>,
     bind_group_layout_render: Option<GpuBindGroupLayout>,
+
+    readback_in_progress: Rc<std::cell::Cell<bool>>,
 }
 
 #[wasm_bindgen]
@@ -115,6 +117,7 @@ impl FlexRenderer {
             atlas_width: 0,
             atlas_height: 0,
             sampler: None,
+            readback_in_progress: Rc::new(std::cell::Cell::new(false)),
         }
     }
 }
@@ -390,6 +393,7 @@ impl FlexRenderer {
             // log("Render: skipping, no dirty");
             return;
         }
+        // crate::log("--- FRAME START ---");
 
         self.engine.borrow_mut().render();
 
@@ -628,7 +632,6 @@ impl FlexRenderer {
         if rebind_needed {
             self.rebind_all();
         }
-
         // Update Class Buffers
         {
             let engine = self.engine.borrow();
@@ -657,7 +660,7 @@ impl FlexRenderer {
                 );
             }
 
-            // Resize node_class_list_buffer if needed
+            // Resize/Sync node_class_list_buffer
             if ncl_byte_len > 0 {
                 let current_size = Reflect::get(self.node_class_list_buffer.as_ref().unwrap(), &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
                 if ncl_byte_len > current_size {
@@ -818,8 +821,52 @@ impl FlexRenderer {
         render_pass.end_render();
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
         self.engine.borrow_mut().mark_clean();
-        
 
+        // PASS 5: Read-back Nodes for hit testing (deferred to end of frame)
+        if !self.readback_in_progress.get() {
+            self.readback_in_progress.set(true);
+            let device = self.device.clone();
+            let nodes_buffer = self.nodes_buffer.as_ref().unwrap().clone();
+            let engine = self.engine.clone();
+            let readback_flag = self.readback_in_progress.clone();
+
+            let _ = wasm_bindgen_futures::future_to_promise(async move {
+                let size_val = Reflect::get(&nodes_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0);
+                if size_val > 0.0 {
+                    let staging_buf = device.create_buffer(&GpuBufferDescriptor::new(size_val, 0x0001 | 0x0008));
+                    let encoder = device.create_command_encoder();
+                    encoder.copy_buffer_to_buffer(&nodes_buffer, 0.0, &staging_buf, 0.0, size_val);
+                    device.queue().submit(&js_sys::Array::of1(&encoder.finish()));
+
+                    let promise = staging_buf.map_async(0x0001); // MAP_READ
+                    if let Ok(_) = wasm_bindgen_futures::JsFuture::from(promise).await {
+                         let array_buffer = staging_buf.get_mapped_range();
+                         let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+                         let vec = uint8_array.to_vec();
+                         staging_buf.unmap();
+                         staging_buf.destroy();
+
+                         let node_size = std::mem::size_of::<crate::GpuNode>();
+                          let count = vec.len() / node_size;
+                         // crate::log(&format!("Readback complete: {} nodes", count));
+                         let mut gpu_nodes = Vec::with_capacity(count);
+                         for i in 0..count {
+                             let offset = i * node_size;
+                             let mut node = std::mem::MaybeUninit::<crate::GpuNode>::uninit();
+                             unsafe {
+                                 std::ptr::copy_nonoverlapping(vec.as_ptr().add(offset), node.as_mut_ptr() as *mut u8, node_size);
+                             }
+                             gpu_nodes.push(unsafe { node.assume_init() });
+                         }
+                         engine.borrow_mut().hit_test_nodes = gpu_nodes;
+                    } else {
+                        staging_buf.destroy();
+                    }
+                }
+                readback_flag.set(false);
+                Ok(JsValue::UNDEFINED)
+            });
+        }
     }
 
     pub fn debug(&self) -> Promise {
@@ -931,7 +978,7 @@ impl FlexRenderer {
             
             let callbacks = {
                 let mut e = engine.borrow_mut();
-                e.gpu_nodes = gpu_nodes;
+                e.hit_test_nodes = gpu_nodes;
                 e.handle_click(x, y)
             };
             
@@ -940,6 +987,10 @@ impl FlexRenderer {
             }
             Ok(JsValue::UNDEFINED)
         })
+    }
+
+    pub fn handle_mousemove(&self, x: f32, y: f32) {
+        self.engine.borrow_mut().handle_mousemove(x, y);
     }
 
     pub fn handle_keydown(&self, key: String) {

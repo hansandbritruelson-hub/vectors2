@@ -372,7 +372,7 @@ pub struct GpuNode {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input
+    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input, Bit 4 = Hovered
     pub natural_content_width: f32,
 
     // --- Texture Atlas UVs ---
@@ -425,14 +425,15 @@ pub struct GpuNode {
     pub box_shadow_spread: f32,
     pub box_shadow_color: u32,
 
-    _pad_style_0: u32,
-    _pad_style_1: u32,
-    _pad_style_2: u32,
+    pub text_color_r: f32,
+    pub text_color_g: f32,
+    pub text_color_b: f32,
+    pub text_color_a: f32,
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 252);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 256);
 }
 
 impl GpuNode {
@@ -450,6 +451,10 @@ impl GpuNode {
             color_g: 0.0,
             color_b: 0.0,
             color_a: 0.0,
+            text_color_r: 1.0, // Default text to white?
+            text_color_g: 1.0,
+            text_color_b: 1.0,
+            text_color_a: 1.0,
             top_offset: 0.0,
             left_offset: 0.0,
             z_index: 0.0,
@@ -495,9 +500,6 @@ impl GpuNode {
             box_shadow_blur: 0.0,
             box_shadow_spread: 0.0,
             box_shadow_color: 0,
-            _pad_style_0: 0,
-            _pad_style_1: 0,
-            _pad_style_2: 0,
         }
     }
 }
@@ -544,6 +546,7 @@ pub struct CpuNode {
     pub on_update_model_value: Option<std::rc::Rc<dyn Fn(String)>>,
 
     pub scope: Option<crate::signals::ScopeId>,
+    pub hovered: bool,
 }
 
 impl CpuNode {
@@ -575,6 +578,7 @@ impl CpuNode {
             input_type: None,
             on_update_model_value: None,
             scope: None,
+            hovered: false,
         }
     }
 }
@@ -616,6 +620,8 @@ pub struct FlexEngine {
     pub(crate) cpu_nodes: Vec<CpuNode>, // The Logical DOM (Linked List)
     #[wasm_bindgen(skip)]
     pub(crate) gpu_nodes: Vec<GpuNode>, // The Render Tree (Flattened)
+    #[wasm_bindgen(skip)]
+    pub(crate) hit_test_nodes: Vec<GpuNode>, // Stable nodes for hit testing (updated via readback)
     
     #[wasm_bindgen(skip)]
     pub characters: Vec<Character>,
@@ -666,6 +672,7 @@ pub struct FlexEngine {
     pub class_offsets: HashMap<String, u32>,  // selector -> offset in class_defs
 
     pub focused_node: Option<u32>,
+    pub last_hover_target: Option<usize>,
     pub dirty: bool,
 }
 
@@ -700,6 +707,8 @@ impl FlexEngine {
             node_class_list: Vec::new(),
             class_offsets: HashMap::new(),
             focused_node: None,
+            last_hover_target: None,
+            hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -1049,18 +1058,54 @@ impl FlexEngine {
         self.class_offsets.clear();
         self.node_class_list.clear();
 
-        // Clone rules to avoid borrow conflict with self.serialize_property
-        let rules: Vec<(String, HashMap<String, StyleValue>)> = self.stylesheet.rules.iter()
-            .map(|r| (r.selector.clone(), r.declarations.clone()))
-            .collect();
+        // Group rules by base selector (e.g. .btn and .btn:hover)
+        let mut grouped: HashMap<String, (HashMap<String, StyleValue>, HashMap<String, StyleValue>)> = HashMap::new();
 
-        for (selector, declarations) in &rules {
-            let offset = self.class_defs.len() as u32;
-            self.class_offsets.insert(selector.clone(), offset);
+        for rule in &self.stylesheet.rules {
+            let (base, is_hover) = if let Some(stripped) = rule.selector.strip_suffix(":hover") {
+                (stripped.to_string(), true)
+            } else {
+                (rule.selector.clone(), false)
+            };
 
-            for (prop, val) in declarations {
-                self.serialize_property(prop, val);
+            let entry = grouped.entry(base).or_insert((HashMap::new(), HashMap::new()));
+            if is_hover {
+                for (k, v) in &rule.declarations {
+                    entry.1.insert(k.clone(), v.clone());
+                }
+            } else {
+                for (k, v) in &rule.declarations {
+                    entry.0.insert(k.clone(), v.clone());
+                }
             }
+        }
+
+        // Sort base selectors for deterministic output
+        let mut base_selectors: Vec<_> = grouped.keys().cloned().collect();
+        base_selectors.sort();
+
+        for selector in base_selectors {
+            let (base_decls, hover_decls) = grouped.get(&selector).unwrap();
+            let offset = self.class_defs.len() as u32;
+            self.class_offsets.insert(selector, offset);
+
+            // Write base rules
+            let mut props: Vec<_> = base_decls.keys().collect();
+            props.sort();
+            for prop in props {
+                self.serialize_property(prop, base_decls.get(prop).unwrap());
+            }
+
+            // Write hover rules if present
+            if !hover_decls.is_empty() {
+                self.class_defs.push(CTRL_HOVER_START);
+                let mut h_props: Vec<_> = hover_decls.keys().collect();
+                h_props.sort();
+                for prop in h_props {
+                    self.serialize_property(prop, hover_decls.get(prop).unwrap());
+                }
+            }
+
             self.class_defs.push(CTRL_END);
         }
     }
@@ -1077,9 +1122,18 @@ impl FlexEngine {
     /// Format: [prop_id: u32] [value data: variable u32s depending on property]
     fn serialize_property(&mut self, prop: &str, val: &StyleValue) {
         match prop {
-            "color" | "background-color" => {
+            "background-color" => {
                 if let StyleValue::Color(r, g, b, a) = val {
                     self.class_defs.push(PROP_BACKGROUND_COLOR_RGBA);
+                    self.class_defs.push(r.to_bits());
+                    self.class_defs.push(g.to_bits());
+                    self.class_defs.push(b.to_bits());
+                    self.class_defs.push(a.to_bits());
+                }
+            }
+            "color" => {
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(PROP_TEXT_COLOR_RGBA);
                     self.class_defs.push(r.to_bits());
                     self.class_defs.push(g.to_bits());
                     self.class_defs.push(b.to_bits());
@@ -1542,6 +1596,7 @@ impl FlexEngine {
         }
 
         self.gpu_nodes.clear();
+        self.node_class_list.clear();
         self.characters.clear(); // Rebuild chars too since they depend on node index
         self.curves.truncate(self.permanent_curve_count);
         
@@ -1662,6 +1717,10 @@ impl FlexEngine {
                 // Mirror non-style props (class-resolved props handled by GPU resolve_styles pass)
                 gpu_node.min_width = cn_min_width;
                 gpu_node.flags = cn_flags;
+                if self.cpu_nodes[cpu_idx].hovered {
+                    gpu_node.flags |= 16; // Bit 4 = Hovered
+                }
+                
                 gpu_node.cpu_index = cpu_idx as u32;
                 
                 // Topology
@@ -2060,8 +2119,8 @@ impl FlexEngine {
 impl FlexEngine {
     pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<std::rc::Rc<dyn Fn()>> {
         let mut hit_idx = None;
-        for i in (0..self.gpu_nodes.len()).rev() {
-            let n = &self.gpu_nodes[i];
+        for i in (0..self.hit_test_nodes.len()).rev() {
+            let n = &self.hit_test_nodes[i];
             
             // Skip invisible if flag bit 0 is Not set
             if (n.flags & 1) == 0 { continue; }
@@ -2080,12 +2139,13 @@ impl FlexEngine {
 
         if hit_idx.is_none() {
             log(&format!("No hit at ({} , {})", x, y));
+            self.focused_node = None;
         }
 
         let mut callbacks = Vec::new();
 
         if let Some(gpu_idx) = hit_idx {
-            let initial_cpu_idx = self.gpu_nodes[gpu_idx].cpu_index as usize;
+            let initial_cpu_idx = self.hit_test_nodes[gpu_idx].cpu_index as usize;
             
             // Event Bubbling
             let mut current_cpu_idx = Some(initial_cpu_idx);
@@ -2101,23 +2161,65 @@ impl FlexEngine {
                     if node.input_type.is_some() {
                         self.focused_node = Some(cpu_idx as u32);
                         log(&format!("Focused Input Node: {}", cpu_idx));
-                    } else if current_cpu_idx == Some(initial_cpu_idx) {
-                        // If we clicked something else and it's the leaf, clear focus
-                        // (Rough focus-loss logic)
-                        self.focused_node = None;
                     }
-
+                    
                     current_cpu_idx = node.parent;
-                } else {
-                    break;
                 }
             }
-        } else {
-            // Clicked empty space
-            self.focused_node = None;
         }
 
         callbacks
+    }
+
+    pub fn handle_mousemove(&mut self, x: f32, y: f32) {
+        let mut hit_idx = None;
+        // Search backwards to find topmost element
+        for i in (0..self.hit_test_nodes.len()).rev() {
+            let n = &self.hit_test_nodes[i];
+            
+            // Skip invisible if flag bit 0 is Not set
+            if (n.flags & 1) == 0 { continue; }
+
+            let left = n.final_x;
+            let top = n.final_y;
+            let right = left + n.final_width;
+            let bottom = top + n.final_height;
+
+            if x >= left && x <= right && y >= top && y <= bottom {
+                hit_idx = Some(i);
+                break;
+            }
+        }
+
+        let target_cpu_idx = hit_idx.map(|idx| self.hit_test_nodes[idx].cpu_index as usize);
+        
+        // Only update if the leaf hover target has changed
+        if target_cpu_idx == self.last_hover_target {
+            return;
+        }
+
+        self.last_hover_target = target_cpu_idx;
+        let mut changed_hover = false;
+
+        // Collect hover chain (target + all ancestors)
+        let mut hover_chain = std::collections::HashSet::new();
+        let mut curr = target_cpu_idx;
+        while let Some(idx) = curr {
+            hover_chain.insert(idx);
+            curr = self.cpu_nodes[idx].parent;
+        }
+
+        for (idx, node) in self.cpu_nodes.iter_mut().enumerate() {
+            let is_hovered = hover_chain.contains(&idx);
+            if node.hovered != is_hovered {
+                node.hovered = is_hovered;
+                changed_hover = true;
+            }
+        }
+
+        if changed_hover {
+            self.mark_dirty();
+        }
     }
 
     pub fn handle_keydown(&mut self, key: String) -> Option<(std::rc::Rc<dyn Fn(String)>, String)> {
