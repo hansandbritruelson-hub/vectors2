@@ -92,11 +92,11 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Color(0.039215688f32, 0.039215688f32, 0.047058824f32, 1f32),
         );
         decls.insert(
-            "width".to_string(),
+            "height".to_string(),
             renderer_core::StyleValue::Percent(100f32),
         );
         decls.insert(
-            "height".to_string(),
+            "width".to_string(),
             renderer_core::StyleValue::Percent(100f32),
         );
         e.add_style_rule(".container".to_string(), decls);
@@ -104,41 +104,43 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.08235294f32, 0.08235294f32, 0.93333334f32, 1f32),
-        );
-        decls.insert(
             "flex-direction".to_string(),
             renderer_core::StyleValue::Ident("row".to_string()),
         );
+        decls.insert(
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.08235294f32, 0.08235294f32, 0.93333334f32, 1f32),
+        );
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(60f32));
         e.add_style_rule(".nav".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(60f32));
+        decls.insert("width".to_string(), renderer_core::StyleValue::Px(100f32));
         decls.insert(
             "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.08627451f32, 0.08627451f32, 0.101960786f32, 1f32),
+            renderer_core::StyleValue::Color(0.16470589f32, 0.68235296f32, 0.13725491f32, 1f32),
         );
-        decls.insert("width".to_string(), renderer_core::StyleValue::Px(100f32));
         e.add_style_rule(".nav-item".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
             "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.16470589f32, 0.16470589f32, 0.22745098f32, 1f32),
+            renderer_core::StyleValue::Color(0.15294118f32, 0.73333335f32, 0.40392157f32, 1f32),
         );
         e.add_style_rule(".nav-item:hover".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
-        );
-        decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.05882353f32, 0.05882353f32, 0.07058824f32, 1f32),
+        );
+        decls.insert(
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
         );
         e.add_style_rule(".content".to_string(), decls);
     }

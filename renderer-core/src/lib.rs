@@ -8,6 +8,11 @@ pub mod web_bindings;
 pub mod signals;
 pub mod texture_atlas;
 // REMOVED: pub mod generated_ui;
+mod style_constants {
+    include!(concat!(env!("OUT_DIR"), "/style_constants.rs"));
+}
+use style_constants::*;
+
 #[cfg(test)]
 mod tests;
 pub use renderer::FlexRenderer;
@@ -376,15 +381,21 @@ pub struct GpuNode {
     pub uv_max_x: f32, 
     pub uv_max_y: f32,
     
-    // --- Padding to 128 bytes ---
+    // --- Misc ---
     pub cpu_index: u32, 
     pub curve_start_index: u32, 
     pub curve_count: u32, 
+
+    // --- GPU Style System ---
+    pub class_data_offset: u32,  // offset into node_class_list buffer
+    _pad_style_0: u32,
+    _pad_style_1: u32,
+    _pad_style_2: u32,
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 128);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 144);
 }
 
 impl GpuNode {
@@ -419,6 +430,10 @@ impl GpuNode {
             cpu_index: 0, 
             curve_start_index: 0, 
             curve_count: 0,
+            class_data_offset: 0,
+            _pad_style_0: 0,
+            _pad_style_1: 0,
+            _pad_style_2: 0,
         }
     }
 }
@@ -578,6 +593,14 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub root_scope_id: Option<crate::signals::ScopeId>,
 
+    // --- GPU Style Buffers ---
+    #[wasm_bindgen(skip)]
+    pub class_defs: Vec<u32>,         // serialized class property data
+    #[wasm_bindgen(skip)]
+    pub node_class_list: Vec<u32>,    // per-node [count, offset0, offset1, ...]
+    #[wasm_bindgen(skip)]
+    pub class_offsets: HashMap<String, u32>,  // selector -> offset in class_defs
+
     pub focused_node: Option<u32>,
     pub dirty: bool,
 }
@@ -609,6 +632,9 @@ impl FlexEngine {
             stylesheet: StyleSheet::default(),
             free_nodes: Vec::new(),
             root_scope_id: None,
+            class_defs: Vec::new(),
+            node_class_list: Vec::new(),
+            class_offsets: HashMap::new(),
             focused_node: None,
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
@@ -949,14 +975,172 @@ impl FlexEngine {
         // No-op
     }
 
+    // --- GPU Style Buffer Construction ---
+
+    /// Serializes all stylesheet rules into the `class_defs` buffer.
+    /// Each class becomes: [prop_id, ...value_data]* [CTRL_END]
+    /// Records each selector's offset in `class_offsets`.
+    fn build_class_buffers(&mut self) {
+        self.class_defs.clear();
+        self.class_offsets.clear();
+        self.node_class_list.clear();
+
+        // Clone rules to avoid borrow conflict with self.serialize_property
+        let rules: Vec<(String, HashMap<String, StyleValue>)> = self.stylesheet.rules.iter()
+            .map(|r| (r.selector.clone(), r.declarations.clone()))
+            .collect();
+
+        for (selector, declarations) in &rules {
+            let offset = self.class_defs.len() as u32;
+            self.class_offsets.insert(selector.clone(), offset);
+
+            for (prop, val) in declarations {
+                self.serialize_property(prop, val);
+            }
+            self.class_defs.push(CTRL_END);
+        }
+    }
+
+    /// Serializes a single CSS property into `class_defs`.
+    /// Format: [prop_id: u32] [value data: variable u32s depending on property]
+    fn serialize_property(&mut self, prop: &str, val: &StyleValue) {
+        match prop {
+            "color" | "background-color" => {
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(PROP_BACKGROUND_COLOR_RGBA);
+                    self.class_defs.push(r.to_bits());
+                    self.class_defs.push(g.to_bits());
+                    self.class_defs.push(b.to_bits());
+                    self.class_defs.push(a.to_bits());
+                }
+            }
+            "width" => {
+                self.class_defs.push(PROP_WIDTH);
+                match val {
+                    StyleValue::Px(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                    StyleValue::Percent(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PERCENT);
+                    }
+                    _ => {
+                        self.class_defs.push(0f32.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                }
+            }
+            "height" => {
+                self.class_defs.push(PROP_HEIGHT);
+                match val {
+                    StyleValue::Px(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                    StyleValue::Percent(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PERCENT);
+                    }
+                    _ => {
+                        self.class_defs.push(0f32.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                }
+            }
+            "flex-direction" => {
+                self.class_defs.push(PROP_FLEX_DIRECTION);
+                if let StyleValue::Ident(s) = val {
+                    match s.as_str() {
+                        "column" => self.class_defs.push(1),
+                        _ => self.class_defs.push(0), // row
+                    }
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "position" => {
+                self.class_defs.push(PROP_POSITION_MODE);
+                if let StyleValue::Ident(s) = val {
+                    match s.as_str() {
+                        "absolute" => self.class_defs.push(1),
+                        _ => self.class_defs.push(0), // relative
+                    }
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "top" => {
+                self.class_defs.push(PROP_TOP);
+                match val {
+                    StyleValue::Px(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                    _ => {
+                        self.class_defs.push(0f32.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                }
+            }
+            "left" => {
+                self.class_defs.push(PROP_LEFT);
+                match val {
+                    StyleValue::Px(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                    _ => {
+                        self.class_defs.push(0f32.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                }
+            }
+            "z-index" => {
+                self.class_defs.push(PROP_Z_INDEX);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                }
+            }
+            _ => {} // Unsupported properties silently ignored
+        }
+    }
+
+    /// Builds a node's entry in `node_class_list` and returns the offset.
+    /// Format: [count: u32, class_def_offset_0: u32, class_def_offset_1: u32, ...]
+    fn build_node_class_entry(&mut self, cpu_idx: usize) -> u32 {
+        let offset = self.node_class_list.len() as u32;
+        let classes = &self.cpu_nodes[cpu_idx].classes;
+
+        // Collect matching class offsets
+        let mut matching_offsets: Vec<u32> = Vec::new();
+        for class_name in classes {
+            let dot_selector = format!(".{}", class_name);
+            if let Some(&def_offset) = self.class_offsets.get(&dot_selector) {
+                matching_offsets.push(def_offset);
+            } else if let Some(&def_offset) = self.class_offsets.get(class_name) {
+                matching_offsets.push(def_offset);
+            }
+        }
+
+        self.node_class_list.push(matching_offsets.len() as u32);
+        for off in matching_offsets {
+            self.node_class_list.push(off);
+        }
+
+        offset
+    }
+
     // --- Flattening (CPU -> GPU) ---
     // This is the bridge. Rebuilds gpu_nodes from cpu_nodes.
     fn flatten(&mut self) {
-        // 0. Pre-pass: Style Application & Texture Management
+        // 0. Pre-pass: Build class buffers & Texture Management
+        self.build_class_buffers();
         self.texture_atlas.process_deletions();
 
         for i in 0..self.cpu_nodes.len() {
-             self.apply_styles(i);
              
              // We work around borrow checker by extracting needed data first if possible,
              // or just carefully using indices.
@@ -1110,20 +1294,23 @@ impl FlexEngine {
         while let Some(cpu_idx) = queue.pop_front() {
             let gpu_idx = *cpu_to_gpu.get(&cpu_idx).unwrap();
             
-            // 2. Clear Styles & Data
-            // from CPU Node to GPU Node
-            // (We do this here to ensure mapped index is ready)
-            let cpu_node = &self.cpu_nodes[cpu_idx];
-            
-            // We need to mutate the GPU node which is already in the vec
-            // But we also need to append children, which might realloc.
+            // Extract all needed data from cpu_node into locals (drop immutable borrow early)
+            let cn_first_child = self.cpu_nodes[cpu_idx].first_child;
+            let cn_parent = self.cpu_nodes[cpu_idx].parent;
+            let cn_min_width = self.cpu_nodes[cpu_idx].min_width;
+            let cn_flags = self.cpu_nodes[cpu_idx].flags;
+            let cn_cached_texture_region = self.cpu_nodes[cpu_idx].cached_texture.as_ref().map(|h| {
+                (h.region.u_min, h.region.v_min, h.region.u_max, h.region.v_max)
+            });
+            let cn_text = self.cpu_nodes[cpu_idx].text.clone();
+            let cn_shape_data = self.cpu_nodes[cpu_idx].shape_data.clone();
             
             // Calculate Children Range
             let start_child_gpu_idx = self.gpu_nodes.len() as u32;
             let mut child_count = 0;
             
             // Iterate Children to reserve/push placeholders
-            let mut curr_child = cpu_node.first_child;
+            let mut curr_child = cn_first_child;
             while let Some(child_cpu_idx) = curr_child {
                 let kid_gpu_idx = self.gpu_nodes.len() as u32;
                 self.gpu_nodes.push(GpuNode::new()); // Placeholder
@@ -1136,30 +1323,21 @@ impl FlexEngine {
             }
             
             // Now update the Parent Node with child info
-            let mut parent_z = 0.0;
             let mut parent_gpu_idx = 0;
-            if let Some(p_cpu) = cpu_node.parent {
+            if let Some(p_cpu) = cn_parent {
                 if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
                      parent_gpu_idx = p_gpu;
-                     parent_z = self.gpu_nodes[p_gpu as usize].z_index;
                 }
             }
 
+            // Build class entry (borrows &mut self)
+            let class_data_offset = self.build_node_class_entry(cpu_idx);
+
             {
                 let gpu_node = &mut self.gpu_nodes[gpu_idx as usize];
-                // Mirror Props
-                gpu_node.fixed_width = cpu_node.fixed_width;
-                gpu_node.min_width = cpu_node.min_width;
-                gpu_node.fixed_height = cpu_node.fixed_height;
-                gpu_node.color_r = cpu_node.color.0;
-                gpu_node.color_g = cpu_node.color.1;
-                gpu_node.color_b = cpu_node.color.2;
-                gpu_node.color_a = cpu_node.color.3;
-                gpu_node.top_offset = cpu_node.top_offset;
-                gpu_node.left_offset = cpu_node.left_offset;
-                gpu_node.position_mode = cpu_node.position_mode;
-                gpu_node.flex_direction = cpu_node.flex_direction;
-                gpu_node.flags = cpu_node.flags; // Visibility
+                // Mirror non-style props (class-resolved props handled by GPU resolve_styles pass)
+                gpu_node.min_width = cn_min_width;
+                gpu_node.flags = cn_flags;
                 gpu_node.cpu_index = cpu_idx as u32;
                 
                 // Topology
@@ -1167,27 +1345,25 @@ impl FlexEngine {
                 gpu_node.child_count = child_count;
                 
                 // Parent Ref
-                gpu_node.parent_index = if cpu_node.parent.is_some() { parent_gpu_idx } else { 0 };
+                gpu_node.parent_index = if cn_parent.is_some() { parent_gpu_idx } else { 0 };
 
-                gpu_node.z_index = cpu_node.z_index.unwrap_or(parent_z);
+                // Class data offset for GPU style resolution
+                gpu_node.class_data_offset = class_data_offset;
                 
                 // Image UV Resolution
-                if let Some(handle) = &cpu_node.cached_texture {
-                    let region = &handle.region;
-                    gpu_node.uv_min_x = region.u_min;
-                    gpu_node.uv_min_y = region.v_min;
-                    gpu_node.uv_max_x = region.u_max;
-                    gpu_node.uv_max_y = region.v_max;
+                if let Some((u_min, v_min, u_max, v_max)) = cn_cached_texture_region {
+                    gpu_node.uv_min_x = u_min;
+                    gpu_node.uv_min_y = v_min;
+                    gpu_node.uv_max_x = u_max;
+                    gpu_node.uv_max_y = v_max;
                     gpu_node.flags |= 2; // Ensure flag is set
                 }
                 
                 // Text Handling (Rebuild Characters)
-                if let Some(text_content) = &cpu_node.text {
+                if let Some(text_content) = &cn_text {
                      let chars_start = self.characters.len() as u32;
                      let chars_vec: Vec<char> = text_content.chars().collect();
                      let chars_len = chars_vec.len() as u32;
-                     
-
                      
                      for (i, &c) in chars_vec.iter().enumerate() {
                         let val = c as u32;
@@ -1202,7 +1378,6 @@ impl FlexEngine {
                         } else { 0 };
             
                         self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, gpu_idx));
-                        
 
                      }
                      
@@ -1211,7 +1386,7 @@ impl FlexEngine {
                 }
 
                 // Shape Handling
-                if let Some(path_str) = &cpu_node.shape_data {
+                if let Some(path_str) = &cn_shape_data {
                      let start_idx = self.curves.len() as u32;
                      let mut collector = PathCollector::new(1.0, 0.0, 0.0);
                      collector.parse_svg_path(path_str);
@@ -1388,6 +1563,30 @@ impl FlexEngine {
     }
 
     // --- New Getters ---
+
+    pub fn get_class_defs_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.class_defs.len() * std::mem::size_of::<u32>();
+        let ptr = self.class_defs.as_ptr() as *const u8;
+        unsafe {
+            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+
+    pub fn get_node_class_list_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.node_class_list.len() * std::mem::size_of::<u32>();
+        let ptr = self.node_class_list.as_ptr() as *const u8;
+        unsafe {
+            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
+        }
+    }
+
+    pub fn get_class_defs_count(&self) -> usize {
+        self.class_defs.len()
+    }
+
+    pub fn get_node_class_list_count(&self) -> usize {
+        self.node_class_list.len()
+    }
 
     pub fn get_curve_buffer(&self) -> js_sys::Uint8Array {
         let size = self.curves.len() * std::mem::size_of::<GpuCurve>();

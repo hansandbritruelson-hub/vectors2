@@ -22,6 +22,7 @@ use crate::{FlexEngine, log};
 
 const SHADER_COMPUTE: &str = include_str!("shaders_compute.wgsl");
 const SHADER_VISUAL: &str = include_str!("shaders_visual.wgsl");
+const SHADER_STYLE_CONSTANTS: &str = include_str!(concat!(env!("OUT_DIR"), "/style_constants.wgsl"));
 
 #[wasm_bindgen]
 pub struct FlexRenderer {
@@ -39,6 +40,8 @@ pub struct FlexRenderer {
     uniform_buffer: Option<GpuBuffer>,
     curve_buffer: Option<GpuBuffer>,
     glyph_info_buffer: Option<GpuBuffer>,
+    class_defs_buffer: Option<GpuBuffer>,
+    node_class_list_buffer: Option<GpuBuffer>,
 
     // Image Resources
     atlas_texture: Option<GpuTexture>,
@@ -53,6 +56,7 @@ pub struct FlexRenderer {
     pipeline_final_layout: Option<GpuComputePipeline>,
     pipeline_render: Option<GpuRenderPipeline>,
     pipeline_render_text: Option<GpuRenderPipeline>,
+    pipeline_resolve_styles: Option<GpuComputePipeline>,
 
     bind_group_compute: Option<GpuBindGroup>,
     bind_group_render: Option<GpuBindGroup>,
@@ -92,6 +96,8 @@ impl FlexRenderer {
             uniform_buffer: None,
             curve_buffer: None,
             glyph_info_buffer: None,
+            class_defs_buffer: None,
+            node_class_list_buffer: None,
             pipeline_reset_signals: None,
             pipeline_bottom_up: None,
             pipeline_top_down: None,
@@ -99,6 +105,7 @@ impl FlexRenderer {
             pipeline_final_layout: None,
             pipeline_render: None,
             pipeline_render_text: None,
+            pipeline_resolve_styles: None,
 
             bind_group_compute: None,
             bind_group_render: None,
@@ -199,7 +206,35 @@ impl FlexRenderer {
         }
         self.glyph_info_buffer = Some(info_buf);
 
-        let module_compute = self.device.create_shader_module(&GpuShaderModuleDescriptor::new(SHADER_COMPUTE));
+        // Class Defs Buffer
+        let class_defs_data = engine.get_class_defs_buffer();
+        let class_defs_alloc = if class_defs_data.byte_length() == 0 { 4 } else { class_defs_data.byte_length() };
+        let class_defs_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+            class_defs_alloc as f64,
+            USAGE_STORAGE | USAGE_COPY_DST
+        ));
+        if class_defs_data.byte_length() > 0 {
+            let vec = class_defs_data.to_vec();
+            self.device.queue().write_buffer_with_f64_and_js_value(&class_defs_buf, 0.0, &js_sys::Uint8Array::from(vec.as_slice()).into());
+        }
+        self.class_defs_buffer = Some(class_defs_buf);
+
+        // Node Class List Buffer
+        let ncl_data = engine.get_node_class_list_buffer();
+        let ncl_alloc = if ncl_data.byte_length() == 0 { 4 } else { ncl_data.byte_length() };
+        let ncl_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+            ncl_alloc as f64,
+            USAGE_STORAGE | USAGE_COPY_DST
+        ));
+        if ncl_data.byte_length() > 0 {
+            let vec = ncl_data.to_vec();
+            self.device.queue().write_buffer_with_f64_and_js_value(&ncl_buf, 0.0, &js_sys::Uint8Array::from(vec.as_slice()).into());
+        }
+        self.node_class_list_buffer = Some(ncl_buf);
+
+        // Prepend generated WGSL constants to compute shader
+        let full_compute_source = format!("{}\n{}", SHADER_STYLE_CONSTANTS, SHADER_COMPUTE);
+        let module_compute = self.device.create_shader_module(&GpuShaderModuleDescriptor::new(&full_compute_source));
         let module_visual = self.device.create_shader_module(&GpuShaderModuleDescriptor::new(SHADER_VISUAL));
 
         let make_layout_entry = |binding: u32, visibility: u32, type_: GpuBufferBindingType| -> js_sys::Object {
@@ -210,12 +245,14 @@ impl FlexRenderer {
              layout_entry
         };
 
-        self.bind_group_layout_compute = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&js_sys::Array::of4(
-            &make_layout_entry(0, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
-            &make_layout_entry(1, GpuShaderStage::COMPUTE, GpuBufferBindingType::Uniform),
-            &make_layout_entry(2, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage),
-            &make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage),
-        ))));
+        let entries_compute = js_sys::Array::new();
+        entries_compute.push(&make_layout_entry(0, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage));
+        entries_compute.push(&make_layout_entry(1, GpuShaderStage::COMPUTE, GpuBufferBindingType::Uniform));
+        entries_compute.push(&make_layout_entry(2, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage));
+        entries_compute.push(&make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
+        entries_compute.push(&make_layout_entry(4, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
+        entries_compute.push(&make_layout_entry(5, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
+        self.bind_group_layout_compute = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&entries_compute)));
 
         let layout_entries = js_sys::Array::new();
         layout_entries.push(&make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage));
@@ -242,6 +279,7 @@ impl FlexRenderer {
         };
 
         self.pipeline_reset_signals = Some(create_compute("reset_signals"));
+        self.pipeline_resolve_styles = Some(create_compute("resolve_styles"));
         self.pipeline_bottom_up = Some(create_compute("width_bottom_up"));
         self.pipeline_top_down = Some(create_compute("width_top_down"));
         self.pipeline_height_bottom_up = Some(create_compute("height_bottom_up"));
@@ -309,12 +347,16 @@ impl FlexRenderer {
         };
         
         self.bind_group_compute = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &js_sys::Array::of4(
-                &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())),
-            ),
+            &{
+                let entries = js_sys::Array::new();
+                entries.push(&GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_buffer.as_ref().unwrap())));
+                entries
+            },
             self.bind_group_layout_compute.as_ref().unwrap(),
         )));
 
@@ -587,6 +629,57 @@ impl FlexRenderer {
             self.rebind_all();
         }
 
+        // Update Class Buffers
+        {
+            let engine = self.engine.borrow();
+            let class_defs_data = engine.get_class_defs_buffer();
+            let ncl_data = engine.get_node_class_list_buffer();
+
+            let cd_byte_len = class_defs_data.byte_length();
+            let ncl_byte_len = ncl_data.byte_length();
+
+            let mut need_rebind = false;
+
+            // Resize class_defs_buffer if needed
+            if cd_byte_len > 0 {
+                let current_size = Reflect::get(self.class_defs_buffer.as_ref().unwrap(), &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+                if cd_byte_len > current_size {
+                    if let Some(old) = &self.class_defs_buffer { old.destroy(); }
+                    self.class_defs_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
+                        cd_byte_len as f64, 0x0080 | 0x0008
+                    )));
+                    need_rebind = true;
+                }
+                let vec = class_defs_data.to_vec();
+                self.device.queue().write_buffer_with_f64_and_js_value(
+                    self.class_defs_buffer.as_ref().unwrap(), 0.0,
+                    &js_sys::Uint8Array::from(vec.as_slice()).into()
+                );
+            }
+
+            // Resize node_class_list_buffer if needed
+            if ncl_byte_len > 0 {
+                let current_size = Reflect::get(self.node_class_list_buffer.as_ref().unwrap(), &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+                if ncl_byte_len > current_size {
+                    if let Some(old) = &self.node_class_list_buffer { old.destroy(); }
+                    self.node_class_list_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
+                        ncl_byte_len as f64, 0x0080 | 0x0008
+                    )));
+                    need_rebind = true;
+                }
+                let vec = ncl_data.to_vec();
+                self.device.queue().write_buffer_with_f64_and_js_value(
+                    self.node_class_list_buffer.as_ref().unwrap(), 0.0,
+                    &js_sys::Uint8Array::from(vec.as_slice()).into()
+                );
+            }
+
+            drop(engine);
+            if need_rebind {
+                self.rebind_all();
+            }
+        }
+
         let command_encoder = self.device.create_command_encoder(); 
         let workgroups = (node_count as f32 / 64.0).ceil() as u32;
         let dispatch = |pass: &GpuComputePassEncoder, x: u32| {
@@ -596,6 +689,15 @@ impl FlexRenderer {
         let end_compute = |pass: &GpuComputePassEncoder| {
              pass.end_compute();
         };
+
+        // PASS 0: Resolve Styles
+        {
+            let pass = command_encoder.begin_compute_pass();
+            pass.set_pipeline_compute(self.pipeline_resolve_styles.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
+            dispatch(&pass, workgroups);
+            end_compute(&pass);
+        }
 
         // PASS 1: Width Bottom-Up
         {
@@ -855,12 +957,16 @@ impl FlexRenderer {
         };
         
         self.bind_group_compute = Some(self.device.create_bind_group(&GpuBindGroupDescriptor::new(
-            &js_sys::Array::of4(
-                &GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())),
-                &GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())),
-            ),
+            &{
+                let entries = js_sys::Array::new();
+                entries.push(&GpuBindGroupEntry::new(0, &make_buffer_binding(self.nodes_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(1, &make_buffer_binding(self.uniform_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_buffer.as_ref().unwrap())));
+                entries
+            },
             self.bind_group_layout_compute.as_ref().unwrap(),
         )));
 

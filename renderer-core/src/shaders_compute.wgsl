@@ -35,8 +35,16 @@ struct Node {
     uv_max_x: f32, 
     uv_max_y: f32,
     
-    // --- Padding to 128 bytes ---
-    _pad4: u32, _pad5: u32, _pad6: u32, // Removed pad7
+    // --- Misc ---
+    cpu_index: u32,
+    curve_start_index: u32,
+    curve_count: u32,
+
+    // --- GPU Style System ---
+    class_data_offset: u32,  // offset into node_class_list
+    _pad_style_0: u32,
+    _pad_style_1: u32,
+    _pad_style_2: u32,
 };
 
 struct Character {
@@ -74,6 +82,12 @@ struct GlyphData {
 @group(0) @binding(1) var<uniform> uniforms: Uniforms;
 @group(0) @binding(2) var<storage, read_write> characters: array<Character>;
 @group(0) @binding(3) var<storage, read> glyph_data: array<GlyphData>;
+@group(0) @binding(4) var<storage, read> class_defs: array<u32>;
+@group(0) @binding(5) var<storage, read> node_class_list: array<u32>;
+
+// --- Style Constants (generated) ---
+// These are injected by the renderer at shader compilation time.
+// See style_defs.toml for the source of truth.
 
 @compute @workgroup_size(64)
 fn reset_signals(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -386,4 +400,79 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
+// PASS 0: Resolve Styles (runs before layout)
+@compute @workgroup_size(64)
+fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let id = global_id.x;
+    if (id >= u32(uniforms.node_count)) {
+        return;
+    }
 
+    // Default values for style properties
+    nodes[id].fixed_width = -1.0;
+    nodes[id].fixed_height = -1.0;
+    nodes[id].color_r = 0.0;
+    nodes[id].color_g = 0.0;
+    nodes[id].color_b = 0.0;
+    nodes[id].color_a = 0.0;
+    nodes[id].top_offset = 0.0;
+    nodes[id].left_offset = 0.0;
+    nodes[id].z_index = 0.0;
+    nodes[id].position_mode = 0u;
+    nodes[id].flex_direction = 0u;
+
+    let list_offset = nodes[id].class_data_offset;
+    let count = node_class_list[list_offset];
+
+    for (var c = 0u; c < count; c = c + 1u) {
+        var pos = node_class_list[list_offset + 1u + c]; // offset into class_defs
+        loop {
+            let prop_id = class_defs[pos];
+            if (prop_id == CTRL_END) { break; }
+            pos = pos + 1u;
+
+            switch (prop_id) {
+                case PROP_BACKGROUND_COLOR_RGBA: {
+                    nodes[id].color_r = bitcast<f32>(class_defs[pos]);
+                    nodes[id].color_g = bitcast<f32>(class_defs[pos + 1u]);
+                    nodes[id].color_b = bitcast<f32>(class_defs[pos + 2u]);
+                    nodes[id].color_a = bitcast<f32>(class_defs[pos + 3u]);
+                    pos = pos + 4u;
+                }
+                case PROP_WIDTH: {
+                    nodes[id].fixed_width = bitcast<f32>(class_defs[pos]);
+                    // class_defs[pos+1] = unit (ignored for now, assume px)
+                    pos = pos + 2u;
+                }
+                case PROP_HEIGHT: {
+                    nodes[id].fixed_height = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_FLEX_DIRECTION: {
+                    nodes[id].flex_direction = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_POSITION_MODE: {
+                    nodes[id].position_mode = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_TOP: {
+                    nodes[id].top_offset = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_LEFT: {
+                    nodes[id].left_offset = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_Z_INDEX: {
+                    nodes[id].z_index = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 1u;
+                }
+                default: {
+                    // Unknown property — skip 1 u32 and hope for the best
+                    pos = pos + 1u;
+                }
+            }
+        }
+    }
+}

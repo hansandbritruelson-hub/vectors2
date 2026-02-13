@@ -1,0 +1,36 @@
+# Style Definitions — Single Source of Truth
+# This file defines all CSS property IDs, control markers, and unit IDs.
+# build.rs reads this and generates:
+#   - $OUT_DIR/style_constants.rs  (Rust consts)
+#   - $OUT_DIR/style_constants.wgsl (WGSL consts)
+#
+# Property comments describe the byte layout AFTER the prop_id u32.
+
+[properties]
+# background_color_rgba = 1   →  [r:f32] [g:f32] [b:f32] [a:f32]
+background_color_rgba = 1
+# width = 2                   →  [value:f32] [unit:u32]
+width = 2
+# height = 3                  →  [value:f32] [unit:u32]
+height = 3
+# flex_direction = 4          →  [value:u32]  (0=row, 1=column)
+flex_direction = 4
+# position_mode = 5           →  [value:u32]  (0=relative, 1=absolute)
+position_mode = 5
+# top = 6                     →  [value:f32] [unit:u32]
+top = 6
+# left = 7                    →  [value:f32] [unit:u32]
+left = 7
+# z_index = 8                 →  [value:f32]
+z_index = 8
+
+[controls]
+# CTRL_END terminates a class definition in class_defs buffer
+end = 4294967295
+
+[units]
+px = 1
+percent = 2
+em = 3
+vh = 4
+vw = 5

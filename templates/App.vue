@@ -34,7 +34,7 @@
 .nav-item {
   width: 100px;
   height: 60px;
-  background: #16161a;
+  background: #2aae23ff;
 }
 .nav-item:hover {
   background: #27bb67ff;

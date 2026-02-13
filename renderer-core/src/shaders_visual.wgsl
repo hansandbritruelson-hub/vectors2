@@ -39,6 +39,12 @@ struct Node {
     cpu_index: u32, 
     curve_start_index: u32, 
     curve_count: u32, 
+
+    // --- GPU Style System ---
+    class_data_offset: u32,
+    _pad_style_0: u32,
+    _pad_style_1: u32,
+    _pad_style_2: u32,
 };
 
 struct Character {
