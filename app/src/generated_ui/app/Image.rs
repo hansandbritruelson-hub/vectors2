@@ -98,7 +98,15 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "padding-right".to_string(),
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
+        );
+        decls.insert(
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.101960786f32, 0.101960786f32, 0.101960786f32, 1f32),
+        );
+        decls.insert(
+            "padding-bottom".to_string(),
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
@@ -106,20 +114,12 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
-        );
-        decls.insert(
-            "padding-bottom".to_string(),
-            renderer_core::StyleValue::Px(20f32),
-        );
-        decls.insert(
             "padding-top".to_string(),
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
-            "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.101960786f32, 0.101960786f32, 0.101960786f32, 1f32),
+            "padding-right".to_string(),
+            renderer_core::StyleValue::Px(20f32),
         );
         e.add_style_rule(".image-editor".to_string(), decls);
     }
@@ -130,21 +130,17 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Color(1f32, 1f32, 1f32, 1f32),
         );
         decls.insert(
-            "font-size".to_string(),
-            renderer_core::StyleValue::Px(24f32),
-        );
-        decls.insert(
             "margin-bottom".to_string(),
             renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "font-size".to_string(),
+            renderer_core::StyleValue::Px(24f32),
         );
         e.add_style_rule(".header".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
-        decls.insert(
-            "margin-bottom".to_string(),
-            renderer_core::StyleValue::Px(10f32),
-        );
         decls.insert(
             "flex-direction".to_string(),
             renderer_core::StyleValue::Ident("row".to_string()),
@@ -152,6 +148,10 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
         decls.insert(
             "align-items".to_string(),
             renderer_core::StyleValue::Ident("center".to_string()),
+        );
+        decls.insert(
+            "margin-bottom".to_string(),
+            renderer_core::StyleValue::Px(10f32),
         );
         e.add_style_rule(".input-row".to_string(), decls);
     }

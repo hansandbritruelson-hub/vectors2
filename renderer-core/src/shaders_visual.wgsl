@@ -42,6 +42,19 @@ struct Node {
 
     // --- GPU Style System ---
     class_data_offset: u32,
+    
+    // --- Padding ---
+    padding_top: f32,
+    padding_right: f32,
+    padding_bottom: f32,
+    padding_left: f32,
+
+    // --- Margin ---
+    margin_top: f32,
+    margin_right: f32,
+    margin_bottom: f32,
+    margin_left: f32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
     _pad_style_2: u32,

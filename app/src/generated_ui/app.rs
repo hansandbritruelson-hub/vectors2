@@ -45,6 +45,13 @@ pub fn build(engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>, _props: Props
             node_2;
             let node_5 = div().class("content").build(engine.clone(), Some(node_1));
             {
+                let node_6 = div().class("test-box").build(engine.clone(), Some(node_5));
+                {
+                    let node_7 = div().class("inner-box").build(engine.clone(), Some(node_6));
+                    {}
+                    node_7;
+                }
+                node_6;
                 {
                     let engine_c = engine.clone();
                     mount_if(
@@ -84,16 +91,16 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
+            "height".to_string(),
+            renderer_core::StyleValue::Percent(100f32),
         );
         decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.039215688f32, 0.039215688f32, 0.047058824f32, 1f32),
         );
         decls.insert(
-            "height".to_string(),
-            renderer_core::StyleValue::Percent(100f32),
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
         );
         decls.insert(
             "width".to_string(),
@@ -104,20 +111,53 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.08235294f32, 0.08235294f32, 0.93333334f32, 1f32),
+        );
+        decls.insert(
+            "padding-top".to_string(),
+            renderer_core::StyleValue::Px(10f32),
+        );
+        decls.insert(
             "flex-direction".to_string(),
             renderer_core::StyleValue::Ident("row".to_string()),
         );
         decls.insert(
-            "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.08235294f32, 0.08235294f32, 0.93333334f32, 1f32),
+            "padding-bottom".to_string(),
+            renderer_core::StyleValue::Px(10f32),
         );
-        decls.insert("height".to_string(), renderer_core::StyleValue::Px(60f32));
+        decls.insert(
+            "padding-left".to_string(),
+            renderer_core::StyleValue::Px(10f32),
+        );
+        decls.insert(
+            "padding-right".to_string(),
+            renderer_core::StyleValue::Px(10f32),
+        );
         e.add_style_rule(".nav".to_string(), decls);
     }
     {
         let mut decls = std::collections::HashMap::new();
-        decls.insert("height".to_string(), renderer_core::StyleValue::Px(60f32));
-        decls.insert("width".to_string(), renderer_core::StyleValue::Px(100f32));
+        decls.insert(
+            "margin-right".to_string(),
+            renderer_core::StyleValue::Px(15f32),
+        );
+        decls.insert(
+            "padding-bottom".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-left".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-right".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-top".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
         decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.16470589f32, 0.68235296f32, 0.13725491f32, 1f32),
@@ -139,9 +179,67 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Color(0.05882353f32, 0.05882353f32, 0.07058824f32, 1f32),
         );
         decls.insert(
+            "padding-right".to_string(),
+            renderer_core::StyleValue::Px(30f32),
+        );
+        decls.insert(
+            "padding-bottom".to_string(),
+            renderer_core::StyleValue::Px(30f32),
+        );
+        decls.insert(
+            "padding-top".to_string(),
+            renderer_core::StyleValue::Px(30f32),
+        );
+        decls.insert(
+            "padding-left".to_string(),
+            renderer_core::StyleValue::Px(30f32),
+        );
+        decls.insert(
             "flex-direction".to_string(),
             renderer_core::StyleValue::Ident("column".to_string()),
         );
         e.add_style_rule(".content".to_string(), decls);
+    }
+    {
+        let mut decls = std::collections::HashMap::new();
+        decls.insert(
+            "padding-top".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-right".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-bottom".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.2f32, 0.2f32, 0.2f32, 1f32),
+        );
+        decls.insert("width".to_string(), renderer_core::StyleValue::Px(200f32));
+        decls.insert(
+            "margin-bottom".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        decls.insert(
+            "padding-left".to_string(),
+            renderer_core::StyleValue::Px(20f32),
+        );
+        e.add_style_rule(".test-box".to_string(), decls);
+    }
+    {
+        let mut decls = std::collections::HashMap::new();
+        decls.insert(
+            "width".to_string(),
+            renderer_core::StyleValue::Percent(100f32),
+        );
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(50f32));
+        decls.insert(
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.33333334f32, 0.33333334f32, 0.33333334f32, 1f32),
+        );
+        e.add_style_rule(".inner-box".to_string(), decls);
     }
 }

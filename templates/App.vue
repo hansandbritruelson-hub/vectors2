@@ -6,6 +6,9 @@
     </div>
     
     <div class="content">
+      <div class="test-box">
+        <div class="inner-box"></div>
+      </div>
       <Image v-if="view == 'image'" />
       <Video v-if="view == 'video'" />
     </div>
@@ -28,13 +31,13 @@
 }
 .nav {
   flex-direction: row;
-  height: 60px;
   background-color: #1515eeff;
+  padding: 10px;
 }
 .nav-item {
-  width: 100px;
-  height: 60px;
   background: #2aae23ff;
+  margin-right: 15px;
+  padding: 20px;
 }
 .nav-item:hover {
   background: #27bb67ff;
@@ -42,5 +45,17 @@
 .content {
   flex-direction: column;
   background-color: #0f0f12;
+  padding: 30px;
+}
+.test-box {
+  width: 200px;
+  background: #333;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.inner-box {
+  width: 100%;
+  height: 50px;
+  background: #555;
 }
 </style>

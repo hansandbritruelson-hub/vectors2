@@ -24,6 +24,24 @@ left = 7
 # z_index = 8                 →  [value:f32]
 z_index = 8
 
+# padding_top = 9             →  [value:f32] [unit:u32]
+padding_top = 9
+# padding_right = 10           →  [value:f32] [unit:u32]
+padding_right = 10
+# padding_bottom = 11          →  [value:f32] [unit:u32]
+padding_bottom = 11
+# padding_left = 12            →  [value:f32] [unit:u32]
+padding_left = 12
+
+# margin_top = 13              →  [value:f32] [unit:u32]
+margin_top = 13
+# margin_right = 14            →  [value:f32] [unit:u32]
+margin_right = 14
+# margin_bottom = 15           →  [value:f32] [unit:u32]
+margin_bottom = 15
+# margin_left = 16             →  [value:f32] [unit:u32]
+margin_left = 16
+
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer
 end = 4294967295

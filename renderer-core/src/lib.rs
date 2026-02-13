@@ -388,6 +388,19 @@ pub struct GpuNode {
 
     // --- GPU Style System ---
     pub class_data_offset: u32,  // offset into node_class_list buffer
+    
+    // --- Padding ---
+    pub padding_top: f32,
+    pub padding_right: f32,
+    pub padding_bottom: f32,
+    pub padding_left: f32,
+
+    // --- Margin ---
+    pub margin_top: f32,
+    pub margin_right: f32,
+    pub margin_bottom: f32,
+    pub margin_left: f32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
     _pad_style_2: u32,
@@ -395,7 +408,7 @@ pub struct GpuNode {
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 144);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 176);
 }
 
 impl GpuNode {
@@ -431,6 +444,14 @@ impl GpuNode {
             curve_start_index: 0, 
             curve_count: 0,
             class_data_offset: 0,
+            padding_top: 0.0,
+            padding_right: 0.0,
+            padding_bottom: 0.0,
+            padding_left: 0.0,
+            margin_top: 0.0,
+            margin_right: 0.0,
+            margin_bottom: 0.0,
+            margin_left: 0.0,
             _pad_style_0: 0,
             _pad_style_1: 0,
             _pad_style_2: 0,
@@ -1102,6 +1123,86 @@ impl FlexEngine {
                     self.class_defs.push(v.to_bits());
                 } else {
                     self.class_defs.push(0f32.to_bits());
+                }
+            }
+            "padding-top" => {
+                self.class_defs.push(PROP_PADDING_TOP);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "padding-right" => {
+                self.class_defs.push(PROP_PADDING_RIGHT);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "padding-bottom" => {
+                self.class_defs.push(PROP_PADDING_BOTTOM);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "padding-left" => {
+                self.class_defs.push(PROP_PADDING_LEFT);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "margin-top" => {
+                self.class_defs.push(PROP_MARGIN_TOP);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "margin-right" => {
+                self.class_defs.push(PROP_MARGIN_RIGHT);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "margin-bottom" => {
+                self.class_defs.push(PROP_MARGIN_BOTTOM);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "margin-left" => {
+                self.class_defs.push(PROP_MARGIN_LEFT);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
                 }
             }
             _ => {} // Unsupported properties silently ignored

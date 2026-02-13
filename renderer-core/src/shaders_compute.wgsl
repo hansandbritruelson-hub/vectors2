@@ -42,6 +42,19 @@ struct Node {
 
     // --- GPU Style System ---
     class_data_offset: u32,  // offset into node_class_list
+    
+    // --- Padding ---
+    padding_top: f32,
+    padding_right: f32,
+    padding_bottom: f32,
+    padding_left: f32,
+
+    // --- Margin ---
+    margin_top: f32,
+    margin_right: f32,
+    margin_bottom: f32,
+    margin_left: f32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
     _pad_style_2: u32,
@@ -183,11 +196,14 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-fn get_negotiated_width(id: u32) -> f32 {
+fn get_negotiated_outer_width(id: u32) -> f32 {
+    var base_w = 0.0;
     if (nodes[id].fixed_width >= 0.0) {
-        return nodes[id].fixed_width;
+        base_w = nodes[id].fixed_width;
+    } else {
+        base_w = max(nodes[id].min_width, nodes[id].natural_content_width);
     }
-    return max(nodes[id].min_width, nodes[id].natural_content_width);
+    return base_w + nodes[id].margin_left + nodes[id].margin_right;
 }
 
 fn process_node_width(id: u32) {
@@ -202,7 +218,7 @@ fn process_node_width(id: u32) {
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
-        nodes[id].natural_content_width = result.width;
+        nodes[id].natural_content_width = result.width + nodes[id].padding_left + nodes[id].padding_right;
     } else {
         var result_width = 0.0;
         let start = nodes[id].child_start_index;
@@ -211,18 +227,18 @@ fn process_node_width(id: u32) {
             for (var i = 0u; i < count; i = i + 1u) {
                 // POS ABSOLUTE CHECK
                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_width = max(result_width, get_negotiated_width(start + i));
+                    result_width = max(result_width, get_negotiated_outer_width(start + i));
                 }
             }
         } else { // Row (Default)
             for (var i = 0u; i < count; i = i + 1u) {
                  // POS ABSOLUTE CHECK
                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_width += get_negotiated_width(start + i);
+                    result_width += get_negotiated_outer_width(start + i);
                 }
             }
         }
-        nodes[id].natural_content_width = result_width;
+        nodes[id].natural_content_width = result_width + nodes[id].padding_left + nodes[id].padding_right;
     }
 }
 
@@ -242,27 +258,34 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
             
             if (nodes[id].position_mode == 1u) {
-                // Absolute: Use negotiated width
-                nodes[id].final_width = get_negotiated_width(id);
+                // Absolute: Use negotiated width (excluding its own margin from the final_width property, 
+                // because absolute positioning usually defines the box size via width)
+                if (nodes[id].fixed_width >= 0.0) {
+                    nodes[id].final_width = nodes[id].fixed_width;
+                } else {
+                    nodes[id].final_width = max(nodes[id].min_width, nodes[id].natural_content_width);
+                }
             } else {
                 // Relative/Flex
+                let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right);
+                
                 if (nodes[parent_id].flex_direction == 1u) { // Column
                     if (nodes[id].fixed_width >= 0.0) {
                         nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        nodes[id].final_width = nodes[parent_id].final_width;
+                        nodes[id].final_width = max(0.0, available_parent_inner_width - nodes[id].margin_left - nodes[id].margin_right);
                     }
                 } else { // Row
                     if (nodes[id].fixed_width >= 0.0) {
                         nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        let parent_natural = nodes[parent_id].natural_content_width;
-                        let parent_final = nodes[parent_id].final_width;
-                        let my_negotiated = get_negotiated_width(id);
+                        let parent_natural_inner = max(0.0, nodes[parent_id].natural_content_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right);
+                        let my_negotiated_outer = get_negotiated_outer_width(id);
                         
-                        if (parent_natural > 0.0) {
-                            let ratio = parent_final / parent_natural;
-                            nodes[id].final_width = my_negotiated * ratio;
+                        if (parent_natural_inner > 0.0) {
+                            let ratio = available_parent_inner_width / parent_natural_inner;
+                            let my_final_outer = my_negotiated_outer * ratio;
+                            nodes[id].final_width = max(0.0, my_final_outer - nodes[id].margin_left - nodes[id].margin_right);
                         } else {
                             nodes[id].final_width = 0.0;
                         }
@@ -320,8 +343,9 @@ fn process_node_height(id: u32) {
 
     let count = nodes[id].child_count;
     if (count == 0u) {
-        let result = layout_text(id, nodes[id].final_width, true);
-        nodes[id].desired_height = result.height;
+        let available_text_width = max(0.0, nodes[id].final_width - nodes[id].padding_left - nodes[id].padding_right);
+        let result = layout_text(id, available_text_width, true);
+        nodes[id].desired_height = result.height + nodes[id].padding_top + nodes[id].padding_bottom;
     } else {
         var result_height = 0.0;
         let start = nodes[id].child_start_index;
@@ -329,17 +353,17 @@ fn process_node_height(id: u32) {
         if (nodes[id].flex_direction == 1u) { // Column
             for (var i = 0u; i < count; i = i + 1u) {
                  if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_height += nodes[start + i].desired_height;
+                    result_height += nodes[start + i].desired_height + nodes[start + i].margin_top + nodes[start + i].margin_bottom;
                  }
             }
         } else { // Row
             for (var i = 0u; i < count; i = i + 1u) {
                 if (nodes[start + i].position_mode == 0u && (nodes[start + i].flags & 1u) != 0u) {
-                    result_height = max(result_height, nodes[start + i].desired_height);
+                    result_height = max(result_height, nodes[start + i].desired_height + nodes[start + i].margin_top + nodes[start + i].margin_bottom);
                 }
             }
         }
-        nodes[id].desired_height = result_height;
+        nodes[id].desired_height = result_height + nodes[id].padding_top + nodes[id].padding_bottom;
     }
 }
 
@@ -363,36 +387,36 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
             nodes[id].final_height = nodes[id].desired_height;
 
             if (nodes[id].position_mode == 1u) { // Absolute
-                 nodes[id].final_x = nodes[parent_id].final_x + nodes[id].left_offset;
-                 nodes[id].final_y = nodes[parent_id].final_y + nodes[id].top_offset;
+                 nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[id].left_offset + nodes[id].margin_left;
+                 nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[id].top_offset + nodes[id].margin_top;
             } else { // Relative
                 if (nodes[parent_id].flex_direction == 1u) { // Column
-                    nodes[id].final_x = nodes[parent_id].final_x;
+                    nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[id].margin_left;
                     
-                    var y_cursor = nodes[parent_id].final_y;
+                    var y_cursor = nodes[parent_id].final_y + nodes[parent_id].padding_top;
                     let start = nodes[parent_id].child_start_index;
                     
                     // Sum previous siblings only if they are relative
                     for (var i = start; i < id; i = i + 1u) {
                         if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
-                            y_cursor += nodes[i].desired_height;
+                            y_cursor += nodes[i].final_height + nodes[i].margin_top + nodes[i].margin_bottom;
                         }
                     }
-                    nodes[id].final_y = y_cursor;
+                    nodes[id].final_y = y_cursor + nodes[id].margin_top;
                     
                 } else { // Row
-                    nodes[id].final_y = nodes[parent_id].final_y;
+                    nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[id].margin_top;
                     
-                    var x_cursor = nodes[parent_id].final_x;
+                    var x_cursor = nodes[parent_id].final_x + nodes[parent_id].padding_left;
                     let start = nodes[parent_id].child_start_index;
                     
                      // Sum previous siblings only if they are relative
                     for (var i = start; i < id; i = i + 1u) {
                         if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
-                            x_cursor += nodes[i].final_width;
+                            x_cursor += nodes[i].final_width + nodes[i].margin_left + nodes[i].margin_right;
                         }
                     }
-                    nodes[id].final_x = x_cursor;
+                    nodes[id].final_x = x_cursor + nodes[id].margin_left;
                 }
             }
             atomicStore(&nodes[id].signals_finished, 1u);
@@ -420,6 +444,14 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].z_index = 0.0;
     nodes[id].position_mode = 0u;
     nodes[id].flex_direction = 0u;
+    nodes[id].padding_top = 0.0;
+    nodes[id].padding_right = 0.0;
+    nodes[id].padding_bottom = 0.0;
+    nodes[id].padding_left = 0.0;
+    nodes[id].margin_top = 0.0;
+    nodes[id].margin_right = 0.0;
+    nodes[id].margin_bottom = 0.0;
+    nodes[id].margin_left = 0.0;
 
     let list_offset = nodes[id].class_data_offset;
     let count = node_class_list[list_offset];
@@ -467,6 +499,38 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 case PROP_Z_INDEX: {
                     nodes[id].z_index = bitcast<f32>(class_defs[pos]);
                     pos = pos + 1u;
+                }
+                case PROP_PADDING_TOP: {
+                    nodes[id].padding_top = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_PADDING_RIGHT: {
+                    nodes[id].padding_right = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_PADDING_BOTTOM: {
+                    nodes[id].padding_bottom = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_PADDING_LEFT: {
+                    nodes[id].padding_left = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_MARGIN_TOP: {
+                    nodes[id].margin_top = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_MARGIN_RIGHT: {
+                    nodes[id].margin_right = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_MARGIN_BOTTOM: {
+                    nodes[id].margin_bottom = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_MARGIN_LEFT: {
+                    nodes[id].margin_left = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
                 }
                 default: {
                     // Unknown property — skip 1 u32 and hope for the best

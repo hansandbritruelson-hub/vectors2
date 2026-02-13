@@ -81,6 +81,8 @@ impl Element {
             .style("left", crate::StyleValue::Px(left))
     }
     pub fn z(self, z: f32) -> Self { self.style("z-index", crate::StyleValue::Px(z)) }
+    pub fn padding(self, v: f32) -> Self { self.style("padding", crate::StyleValue::Px(v)) }
+    pub fn margin(self, v: f32) -> Self { self.style("margin", crate::StyleValue::Px(v)) }
     pub fn child(mut self, child: Element) -> Self { self.children.push(child); self }
     pub fn on_click<F: Fn() + 'static>(mut self, f: F) -> Self { self.on_click = Some(Rc::new(f)); self }
     pub fn value(mut self, signal: ReadSignal<String>) -> Self { self.value_signal = Some(signal); self }

@@ -7,7 +7,8 @@
     "build:compiler": "cargo build -p ui-compiler",
     "compile:ui": "./target/debug/ui-compiler templates/App.vue --output app/src/generated_ui/app.rs",
     "wasm:build": "wasm-pack build app --target web --out-name renderer_core",
-    "dev": "npm run build:compiler && npm run compile:ui && npm run wasm:build && vite",
+    "wasm:build:dev": "wasm-pack build app --dev --target web --out-name renderer_core",
+    "dev": "npm run build:compiler && npm run compile:ui && npm run wasm:build:dev && vite",
     "build": "npm run build:compiler && npm run compile:ui && npm run wasm:build && tsc && vite build",
     "preview": "vite preview"
   },
