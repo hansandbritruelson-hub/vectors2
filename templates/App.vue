@@ -38,8 +38,9 @@
   background: #2aae23ff;
   margin-right: 15px;
   padding: 20px;
-  border: 4px solid #ae2323ff;
-  outline: 8px solid #ae9b23ff;
+  border: 2px solid #1515eeff;
+  outline: 2px solid #ae9b23ff;
+  box-shadow: 4px 4px 3px #c41a1a80;
 }
 .nav-item:hover {
   background: #27bb67ff;
@@ -54,10 +55,12 @@
   background: #333;
   padding: 20px;
   margin-bottom: 20px;
+  box-shadow: 0px 0px 40px 10px #ff0000; /* Red glow shadow */
 }
 .inner-box {
   width: 100%;
   height: 50px;
   background: #555;
+  box-shadow: inset 5px 5px 10px #000000; /* Inset shadow TEST (won't work yet, but let's see) */
 }
 </style>

@@ -72,6 +72,17 @@ outline_color_bottom = 29
 # outline_color_left = 30      →  [packed_rgba:u32]
 outline_color_left = 30
 
+# box_shadow_h_offset = 31     →  [value:f32] [unit:u32]
+box_shadow_h_offset = 31
+# box_shadow_v_offset = 32     →  [value:f32] [unit:u32]
+box_shadow_v_offset = 32
+# box_shadow_blur = 33         →  [value:f32] [unit:u32]
+box_shadow_blur = 33
+# box_shadow_spread = 34       →  [value:f32] [unit:u32]
+box_shadow_spread = 34
+# box_shadow_color = 35        →  [packed_rgba:u32]
+box_shadow_color = 35
+
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer
 end = 4294967295

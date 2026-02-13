@@ -172,6 +172,36 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
                 declarations.insert("outline-color-bottom".into(), color.clone());
                 declarations.insert("outline-color-left".into(), color);
             }
+            "box-shadow" => {
+                let mut h_offset = StyleValue::Px(0.0);
+                let mut v_offset = StyleValue::Px(0.0);
+                let mut blur = StyleValue::Px(0.0);
+                let mut spread = StyleValue::Px(0.0);
+                let mut color = StyleValue::Color(0.0, 0.0, 0.0, 1.0);
+                
+                let mut px_idx = 0;
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => {
+                            match px_idx {
+                                0 => h_offset = v,
+                                1 => v_offset = v,
+                                2 => blur = v,
+                                3 => spread = v,
+                                _ => {}
+                            }
+                            px_idx += 1;
+                        }
+                        StyleValue::Color(..) => color = v,
+                        _ => {}
+                    }
+                }
+                declarations.insert("box-shadow-h-offset".into(), h_offset);
+                declarations.insert("box-shadow-v-offset".into(), v_offset);
+                declarations.insert("box-shadow-blur".into(), blur);
+                declarations.insert("box-shadow-spread".into(), spread);
+                declarations.insert("box-shadow-color".into(), color);
+            }
             "flex-flow" => {
                 if let Some(v) = vals.get(0) { declarations.insert("flex-direction".into(), v.clone()); }
                 if let Some(v) = vals.get(1) { declarations.insert("flex-wrap".into(), v.clone()); }

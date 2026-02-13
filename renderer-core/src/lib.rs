@@ -419,13 +419,20 @@ pub struct GpuNode {
     pub outline_color_bottom: u32,
     pub outline_color_left: u32,
 
+    pub box_shadow_h_offset: f32,
+    pub box_shadow_v_offset: f32,
+    pub box_shadow_blur: f32,
+    pub box_shadow_spread: f32,
+    pub box_shadow_color: u32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
+    _pad_style_2: u32,
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 228);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 252);
 }
 
 impl GpuNode {
@@ -483,8 +490,14 @@ impl GpuNode {
             outline_color_right: 0,
             outline_color_bottom: 0,
             outline_color_left: 0,
+            box_shadow_h_offset: 0.0,
+            box_shadow_v_offset: 0.0,
+            box_shadow_blur: 0.0,
+            box_shadow_spread: 0.0,
+            box_shadow_color: 0,
             _pad_style_0: 0,
             _pad_style_1: 0,
+            _pad_style_2: 0,
         }
     }
 }
@@ -1361,6 +1374,54 @@ impl FlexEngine {
             }
             "outline-color-left" => {
                 self.class_defs.push(PROP_OUTLINE_COLOR_LEFT);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "box-shadow-h-offset" => {
+                self.class_defs.push(PROP_BOX_SHADOW_H_OFFSET);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "box-shadow-v-offset" => {
+                self.class_defs.push(PROP_BOX_SHADOW_V_OFFSET);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "box-shadow-blur" => {
+                self.class_defs.push(PROP_BOX_SHADOW_BLUR);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "box-shadow-spread" => {
+                self.class_defs.push(PROP_BOX_SHADOW_SPREAD);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "box-shadow-color" => {
+                self.class_defs.push(PROP_BOX_SHADOW_COLOR);
                 if let StyleValue::Color(r, g, b, a) = val {
                     self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
                 } else {

@@ -73,8 +73,15 @@ struct Node {
     outline_color_bottom: u32,
     outline_color_left: u32,
 
+    box_shadow_h_offset: f32,
+    box_shadow_v_offset: f32,
+    box_shadow_blur: f32,
+    box_shadow_spread: f32,
+    box_shadow_color: u32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
+    _pad_style_2: u32,
 };
 
 struct Character {
@@ -621,6 +628,26 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
                 case PROP_OUTLINE_COLOR_LEFT: {
                     nodes[id].outline_color_left = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_BOX_SHADOW_H_OFFSET: {
+                    nodes[id].box_shadow_h_offset = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BOX_SHADOW_V_OFFSET: {
+                    nodes[id].box_shadow_v_offset = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BOX_SHADOW_BLUR: {
+                    nodes[id].box_shadow_blur = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BOX_SHADOW_SPREAD: {
+                    nodes[id].box_shadow_spread = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BOX_SHADOW_COLOR: {
+                    nodes[id].box_shadow_color = class_defs[pos];
                     pos = pos + 1u;
                 }
                 default: {
