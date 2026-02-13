@@ -145,6 +145,13 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
                     if let Some(&p) = parts.get(1) { declarations.insert("flex-wrap".into(), StyleValue::Ident(p.into())); }
                 }
             }
+            "background" => {
+                if let StyleValue::Color(r, g, b, a) = v {
+                    declarations.insert("background-color".into(), StyleValue::Color(r, g, b, a));
+                } else {
+                    declarations.insert(p, v);
+                }
+            }
             _ => {
                 declarations.insert(p, v);
             }

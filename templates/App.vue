@@ -22,28 +22,25 @@
 <style>
 .container {
   flex-direction: column;
-  background-color: #121212;
+  background: #0a0a0c;
   width: 100%;
   height: 100%;
 }
 .nav {
   flex-direction: row;
   height: 60px;
-  background-color: #1e1e1e;
-  border-bottom: 1px solid #333;
+  background-color: #1515eeff;
 }
 .nav-item {
-  padding: 0 20px;
-  justify-content: center;
-  align-items: center;
-  color: #aaa;
-  cursor: pointer;
+  width: 100px;
+  height: 60px;
+  background: #16161a;
 }
 .nav-item:hover {
-  background-color: #2a2a2a;
-  color: #fff;
+  background: #27bb67ff;
 }
 .content {
-  flex: 1;
+  flex-direction: column;
+  background-color: #0f0f12;
 }
 </style>
