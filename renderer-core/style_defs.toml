@@ -42,6 +42,36 @@ margin_bottom = 15
 # margin_left = 16             →  [value:f32] [unit:u32]
 margin_left = 16
 
+# border_top_width = 17        →  [value:f32] [unit:u32]
+border_top_width = 17
+# border_right_width = 18      →  [value:f32] [unit:u32]
+border_right_width = 18
+# border_bottom_width = 19     →  [value:f32] [unit:u32]
+border_bottom_width = 19
+# border_left_width = 20       →  [value:f32] [unit:u32]
+border_left_width = 20
+# border_color_top = 21        →  [packed_rgba:u32]
+border_color_top = 21
+# border_color_right = 22      →  [packed_rgba:u32]
+border_color_right = 22
+# border_color_bottom = 23     →  [packed_rgba:u32]
+border_color_bottom = 23
+# border_color_left = 24       →  [packed_rgba:u32]
+border_color_left = 24
+
+# outline_width = 25           →  [value:f32] [unit:u32]
+outline_width = 25
+# outline_offset = 26          →  [value:f32] [unit:u32]
+outline_offset = 26
+# outline_color_top = 27       →  [packed_rgba:u32]
+outline_color_top = 27
+# outline_color_right = 28     →  [packed_rgba:u32]
+outline_color_right = 28
+# outline_color_bottom = 29    →  [packed_rgba:u32]
+outline_color_bottom = 29
+# outline_color_left = 30      →  [packed_rgba:u32]
+outline_color_left = 30
+
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer
 end = 4294967295

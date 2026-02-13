@@ -96,16 +96,16 @@ fn style_value(input: &str) -> IResult<&str, StyleValue> {
     ))(input)
 }
 
-fn declaration(input: &str) -> IResult<&str, (String, StyleValue)> {
+fn declaration(input: &str) -> IResult<&str, (String, Vec<StyleValue>)> {
     let (input, _) = multispace0(input)?;
     let (input, property) = is_not(":}")(input)?;
     let (input, _) = tag(":")(input)?;
     let (input, _) = multispace0(input)?;
-    let (input, value) = style_value(input)?;
+    let (input, values) = separated_list0(multispace1, style_value)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _) = tag(";")(input)?;
     let (input, _) = multispace0(input)?;
-    Ok((input, (property.trim().to_string(), value)))
+    Ok((input, (property.trim().to_string(), values)))
 }
 
 fn rule(input: &str) -> IResult<&str, StyleRule> {
@@ -118,42 +118,73 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
     let (input, _) = multispace0(input)?;
 
     let mut declarations = HashMap::new();
-    for (p, v) in decls {
-        // Expand shorthands
+    for (p, vals) in decls {
         match p.as_str() {
             "padding" => {
-                if let StyleValue::Px(v) = v {
-                    declarations.insert("padding-top".into(), StyleValue::Px(v));
-                    declarations.insert("padding-right".into(), StyleValue::Px(v));
-                    declarations.insert("padding-bottom".into(), StyleValue::Px(v));
-                    declarations.insert("padding-left".into(), StyleValue::Px(v));
+                if let Some(v) = vals.get(0) {
+                    declarations.insert("padding-top".into(), v.clone());
+                    declarations.insert("padding-right".into(), v.clone());
+                    declarations.insert("padding-bottom".into(), v.clone());
+                    declarations.insert("padding-left".into(), v.clone());
                 }
             }
             "margin" => {
-                if let StyleValue::Px(v) = v {
-                    declarations.insert("margin-top".into(), StyleValue::Px(v));
-                    declarations.insert("margin-right".into(), StyleValue::Px(v));
-                    declarations.insert("margin-bottom".into(), StyleValue::Px(v));
-                    declarations.insert("margin-left".into(), StyleValue::Px(v));
+                if let Some(v) = vals.get(0) {
+                    declarations.insert("margin-top".into(), v.clone());
+                    declarations.insert("margin-right".into(), v.clone());
+                    declarations.insert("margin-bottom".into(), v.clone());
+                    declarations.insert("margin-left".into(), v.clone());
                 }
+            }
+            "border" => {
+                let mut width = StyleValue::Px(0.0);
+                let mut color = StyleValue::Color(0.0, 0.0, 0.0, 1.0);
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = v,
+                        StyleValue::Color(..) => color = v,
+                        _ => {} // Skip "solid" etc.
+                    }
+                }
+                declarations.insert("border-top-width".into(), width.clone());
+                declarations.insert("border-right-width".into(), width.clone());
+                declarations.insert("border-bottom-width".into(), width.clone());
+                declarations.insert("border-left-width".into(), width);
+
+                declarations.insert("border-color-top".into(), color.clone());
+                declarations.insert("border-color-right".into(), color.clone());
+                declarations.insert("border-color-bottom".into(), color.clone());
+                declarations.insert("border-color-left".into(), color);
+            }
+            "outline" => {
+                let mut width = StyleValue::Px(0.0);
+                let mut color = StyleValue::Color(0.0, 0.0, 0.0, 1.0);
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = v,
+                        StyleValue::Color(..) => color = v,
+                        _ => {}
+                    }
+                }
+                declarations.insert("outline-width".into(), width);
+                declarations.insert("outline-color-top".into(), color.clone());
+                declarations.insert("outline-color-right".into(), color.clone());
+                declarations.insert("outline-color-bottom".into(), color.clone());
+                declarations.insert("outline-color-left".into(), color);
             }
             "flex-flow" => {
-                // simple split for flex-flow
-                if let StyleValue::Ident(ref s) = v {
-                    let parts: Vec<&str> = s.split_whitespace().collect();
-                    if let Some(&p) = parts.get(0) { declarations.insert("flex-direction".into(), StyleValue::Ident(p.into())); }
-                    if let Some(&p) = parts.get(1) { declarations.insert("flex-wrap".into(), StyleValue::Ident(p.into())); }
-                }
+                if let Some(v) = vals.get(0) { declarations.insert("flex-direction".into(), v.clone()); }
+                if let Some(v) = vals.get(1) { declarations.insert("flex-wrap".into(), v.clone()); }
             }
             "background" => {
-                if let StyleValue::Color(r, g, b, a) = v {
-                    declarations.insert("background-color".into(), StyleValue::Color(r, g, b, a));
-                } else {
-                    declarations.insert(p, v);
+                if let Some(v) = vals.get(0) {
+                    declarations.insert("background-color".into(), v.clone());
                 }
             }
             _ => {
-                declarations.insert(p, v);
+                if let Some(v) = vals.get(0) {
+                    declarations.insert(p, v.clone());
+                }
             }
         }
     }

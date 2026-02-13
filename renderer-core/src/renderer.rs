@@ -255,7 +255,7 @@ impl FlexRenderer {
         self.bind_group_layout_compute = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&entries_compute)));
 
         let layout_entries = js_sys::Array::new();
-        layout_entries.push(&make_layout_entry(0, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage));
+        layout_entries.push(&make_layout_entry(0, GpuShaderStage::VERTEX | GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage));
         layout_entries.push(&make_layout_entry(1, GpuShaderStage::VERTEX, GpuBufferBindingType::Uniform));
         layout_entries.push(&make_layout_entry(2, GpuShaderStage::VERTEX, GpuBufferBindingType::ReadOnlyStorage));
         layout_entries.push(&make_layout_entry(3, GpuShaderStage::FRAGMENT, GpuBufferBindingType::ReadOnlyStorage));

@@ -401,14 +401,31 @@ pub struct GpuNode {
     pub margin_bottom: f32,
     pub margin_left: f32,
 
+    // --- Border & Outline ---
+    pub border_top_width: f32,
+    pub border_right_width: f32,
+    pub border_bottom_width: f32,
+    pub border_left_width: f32,
+
+    pub border_color_top: u32,
+    pub border_color_right: u32,
+    pub border_color_bottom: u32,
+    pub border_color_left: u32,
+
+    pub outline_width: f32,
+    pub outline_offset: f32,
+    pub outline_color_top: u32,
+    pub outline_color_right: u32,
+    pub outline_color_bottom: u32,
+    pub outline_color_left: u32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
-    _pad_style_2: u32,
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 176);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 228);
 }
 
 impl GpuNode {
@@ -452,9 +469,22 @@ impl GpuNode {
             margin_right: 0.0,
             margin_bottom: 0.0,
             margin_left: 0.0,
+            border_top_width: 0.0,
+            border_right_width: 0.0,
+            border_bottom_width: 0.0,
+            border_left_width: 0.0,
+            border_color_top: 0,
+            border_color_right: 0,
+            border_color_bottom: 0,
+            border_color_left: 0,
+            outline_width: 0.0,
+            outline_offset: 0.0,
+            outline_color_top: 0,
+            outline_color_right: 0,
+            outline_color_bottom: 0,
+            outline_color_left: 0,
             _pad_style_0: 0,
             _pad_style_1: 0,
-            _pad_style_2: 0,
         }
     }
 }
@@ -1022,6 +1052,14 @@ impl FlexEngine {
         }
     }
 
+    fn pack_color(r: f32, g: f32, b: f32, a: f32) -> u32 {
+        let r = (r.clamp(0.0, 1.0) * 255.0) as u32;
+        let g = (g.clamp(0.0, 1.0) * 255.0) as u32;
+        let b = (b.clamp(0.0, 1.0) * 255.0) as u32;
+        let a = (a.clamp(0.0, 1.0) * 255.0) as u32;
+        (a << 24) | (b << 16) | (g << 8) | r
+    }
+
     /// Serializes a single CSS property into `class_defs`.
     /// Format: [prop_id: u32] [value data: variable u32s depending on property]
     fn serialize_property(&mut self, prop: &str, val: &StyleValue) {
@@ -1203,6 +1241,130 @@ impl FlexEngine {
                 } else {
                     self.class_defs.push(0f32.to_bits());
                     self.class_defs.push(UNIT_PX);
+                }
+            }
+            "border-top-width" => {
+                self.class_defs.push(PROP_BORDER_TOP_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "border-right-width" => {
+                self.class_defs.push(PROP_BORDER_RIGHT_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "border-bottom-width" => {
+                self.class_defs.push(PROP_BORDER_BOTTOM_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "border-left-width" => {
+                self.class_defs.push(PROP_BORDER_LEFT_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "border-color-top" => {
+                self.class_defs.push(PROP_BORDER_COLOR_TOP);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "border-color-right" => {
+                self.class_defs.push(PROP_BORDER_COLOR_RIGHT);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "border-color-bottom" => {
+                self.class_defs.push(PROP_BORDER_COLOR_BOTTOM);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "border-color-left" => {
+                self.class_defs.push(PROP_BORDER_COLOR_LEFT);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "outline-width" => {
+                self.class_defs.push(PROP_OUTLINE_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "outline-offset" => {
+                self.class_defs.push(PROP_OUTLINE_OFFSET);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
+            "outline-color-top" => {
+                self.class_defs.push(PROP_OUTLINE_COLOR_TOP);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "outline-color-right" => {
+                self.class_defs.push(PROP_OUTLINE_COLOR_RIGHT);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "outline-color-bottom" => {
+                self.class_defs.push(PROP_OUTLINE_COLOR_BOTTOM);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "outline-color-left" => {
+                self.class_defs.push(PROP_OUTLINE_COLOR_LEFT);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
                 }
             }
             _ => {} // Unsupported properties silently ignored

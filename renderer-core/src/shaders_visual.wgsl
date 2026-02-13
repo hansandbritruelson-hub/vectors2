@@ -55,9 +55,26 @@ struct Node {
     margin_bottom: f32,
     margin_left: f32,
 
+    // --- Border & Outline ---
+    border_top_width: f32,
+    border_right_width: f32,
+    border_bottom_width: f32,
+    border_left_width: f32,
+
+    border_color_top: u32,
+    border_color_right: u32,
+    border_color_bottom: u32,
+    border_color_left: u32,
+
+    outline_width: f32,
+    outline_offset: f32,
+    outline_color_top: u32,
+    outline_color_right: u32,
+    outline_color_bottom: u32,
+    outline_color_left: u32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
-    _pad_style_2: u32,
 };
 
 struct Character {
@@ -112,6 +129,8 @@ struct VertexOutput {
     @location(4) @interpolate(flat) curve_start: u32,
     @location(5) @interpolate(flat) curve_count: u32,
     @location(6) @interpolate(flat) dimensions: vec2<f32>,
+    @location(7) @interpolate(flat) expansion: f32,
+    @location(8) @interpolate(flat) instance_index: u32,
 };
 
 @vertex
@@ -128,10 +147,13 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     var pos = vec2<f32>(0.0, 0.0);
     var uv = vec2<f32>(0.0, 0.0);
 
-    let x1 = node.final_x;
-    let y1 = node.final_y;
-    let x2 = node.final_x + node.final_width;
-    let y2 = node.final_y + node.final_height;
+    // Calculate Expansion (Outline width + offset, if positive)
+    let expansion = node.outline_width + max(0.0, node.outline_offset);
+
+    let x1 = node.final_x - expansion;
+    let y1 = node.final_y - expansion;
+    let x2 = node.final_x + node.final_width + expansion;
+    let y2 = node.final_y + node.final_height + expansion;
     
     if (vertex_index == 0u) { pos = vec2<f32>(x1, y1); uv = vec2<f32>(0.0, 0.0); }
     else if (vertex_index == 1u) { pos = vec2<f32>(x2, y1); uv = vec2<f32>(1.0, 0.0); }
@@ -149,36 +171,87 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.color_r, node.color_g, node.color_b, node.color_a);
-    // Map 0..1 UV to Atlas UV
-    var atlas_u = mix(node.uv_min_x, node.uv_max_x, uv.x);
-    var atlas_v = mix(node.uv_min_y, node.uv_max_y, uv.y);
-    
-    // If it's a shape (Bit 2), pass raw 0..1 UV in local_pos (or scaled to pixels?)
-    // Let's pass 0..1 here, and scale in FS using dimensions.
-    if ((node.flags & 4u) != 0u) {
-        atlas_u = uv.x;
-        atlas_v = uv.y;
-    }
+    out.dimensions = vec2<f32>(node.final_width, node.final_height);
+    out.expansion = expansion;
 
-    out.local_pos = vec2<f32>(atlas_u, atlas_v);
+    // local_pos should be in PIXELS relative to (final_x, final_y)
+    let pixel_x = mix(-expansion, node.final_width + expansion, uv.x);
+    let pixel_y = mix(-expansion, node.final_height + expansion, uv.y);
+    out.local_pos = vec2<f32>(pixel_x, pixel_y);
+
     out.glyph_index = 0u;
     out.flags = node.flags;
     out.curve_start = node.curve_start_index;
     out.curve_count = node.curve_count;
-    out.dimensions = vec2<f32>(node.final_width, node.final_height);
+    out.instance_index = instance_index;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Calculate derivatives unconditionally to ensure uniform control flow
-    let pixel_pos_deriv = in.local_pos * in.dimensions;
-    let dx = dpdx(pixel_pos_deriv);
-    let dy = dpdy(pixel_pos_deriv);
+    // Calculate derivatives at the very beginning to ensure uniform control flow.
+    // Derivatives must be calculated BEFORE any divergent branching (returns/discards).
+    let dx = dpdx(in.local_pos);
+    let dy = dpdy(in.local_pos);
+
+    let node = nodes[in.instance_index];
+    let pixel_pos = in.local_pos; // Already in pixels relative to (final_x, final_y) unexpanded
+    let dims = in.dimensions;
+
+    // --- Outline Rendering ---
+    // Outline is outside the node [0, dims]
+    // expansion is node.outline_width + max(0.0, node.outline_offset)
+    let outline_outer = in.expansion;
+    let outline_inner = in.expansion - node.outline_width;
+
+    // Distance from box [0, 0] to [dims.x, dims.y]
+    let dist_x = max(-pixel_pos.x, pixel_pos.x - dims.x);
+    let dist_y = max(-pixel_pos.y, pixel_pos.y - dims.y);
+    let box_dist = max(dist_x, dist_y);
+
+    if (box_dist > outline_inner && box_dist <= outline_outer) {
+        // We are in the outline area
+        // Determine side
+        if (pixel_pos.y < 0.0 && abs(pixel_pos.y) >= abs(pixel_pos.x) && abs(pixel_pos.y) >= abs(pixel_pos.x - dims.x)) {
+            return unpack4x8unorm(node.outline_color_top);
+        } else if (pixel_pos.y > dims.y && abs(pixel_pos.y - dims.y) >= abs(pixel_pos.x) && abs(pixel_pos.y - dims.y) >= abs(pixel_pos.x - dims.x)) {
+            return unpack4x8unorm(node.outline_color_bottom);
+        } else if (pixel_pos.x < 0.0) {
+            return unpack4x8unorm(node.outline_color_left);
+        } else {
+            return unpack4x8unorm(node.outline_color_right);
+        }
+    }
+
+    // --- Border Rendering ---
+    // Border is inside the node [0, dims]
+    if (box_dist <= 0.0) {
+        // Check if inside any border
+        if (pixel_pos.y < node.border_top_width) {
+            return unpack4x8unorm(node.border_color_top);
+        } else if (pixel_pos.y > dims.y - node.border_bottom_width) {
+            return unpack4x8unorm(node.border_color_bottom);
+        } else if (pixel_pos.x < node.border_left_width) {
+            return unpack4x8unorm(node.border_color_left);
+        } else if (pixel_pos.x > dims.x - node.border_right_width) {
+            return unpack4x8unorm(node.border_color_right);
+        }
+    }
+
+    // --- Content Area ---
+    // If we're here, we're inside the content area (inside the borders)
+    
+    // Normalize UV for current node (0..1 over unexpanded node area)
+    let content_uv = pixel_pos / dims;
 
     // Check if Image Flag (Bit 1 = Value 2) is set
     if ((in.flags & 2u) != 0u) {
-        let tex_color = textureSampleLevel(t_diffuse, s_diffuse, in.local_pos, 0.0);
+        // Map 0..1 UV to Atlas UV
+        let atlas_uv = vec2<f32>(
+            mix(node.uv_min_x, node.uv_max_x, content_uv.x),
+            mix(node.uv_min_y, node.uv_max_y, content_uv.y)
+        );
+        let tex_color = textureSampleLevel(t_diffuse, s_diffuse, atlas_uv, 0.0);
         return tex_color;
     }
     
@@ -186,24 +259,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if ((in.flags & 4u) != 0u) {
          if (in.curve_count == 0u) { discard; }
          
-         let pixel_pos = in.local_pos * in.dimensions;
-         
-         // MSAA (4x4)
+         // MSAA (4x4) using pre-calculated derivatives
          var total_coverage = 0.0;
          let SAMPLES = 4u;
          let STEP = 1.0 / f32(SAMPLES);
          
          for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
              for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {
-                 let offset = vec2<f32>(f32(sx) + 0.5, f32(sy) + 0.5) * STEP;
-                 
-                  // Sample point offset in pixel space
-                 let sub_offset = (vec2<f32>(f32(sx), f32(sy)) / f32(SAMPLES)) - 0.5;
-                 let p_sub = pixel_pos + sub_offset.x * dx + sub_offset.y * dy;
-                 
-                 if (calculate_winding(p_sub, in.curve_start, in.curve_count) != 0) {
-                     total_coverage += 1.0;
-                 }
+                  // Sub-pixel sample offset in pixel space
+                  let sub_offset = (vec2<f32>(f32(sx), f32(sy)) / f32(SAMPLES)) - 0.5;
+                  let p_sub = pixel_pos + sub_offset.x * dx + sub_offset.y * dy;
+                  
+                  if (calculate_winding(p_sub, in.curve_start, in.curve_count) != 0) {
+                      total_coverage += 1.0;
+                  }
              }
          }
          

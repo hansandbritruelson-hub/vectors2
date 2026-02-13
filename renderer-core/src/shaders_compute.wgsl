@@ -55,9 +55,26 @@ struct Node {
     margin_bottom: f32,
     margin_left: f32,
 
+    // --- Border & Outline ---
+    border_top_width: f32,
+    border_right_width: f32,
+    border_bottom_width: f32,
+    border_left_width: f32,
+
+    border_color_top: u32,
+    border_color_right: u32,
+    border_color_bottom: u32,
+    border_color_left: u32,
+
+    outline_width: f32,
+    outline_offset: f32,
+    outline_color_top: u32,
+    outline_color_right: u32,
+    outline_color_bottom: u32,
+    outline_color_left: u32,
+
     _pad_style_0: u32,
     _pad_style_1: u32,
-    _pad_style_2: u32,
 };
 
 struct Character {
@@ -215,10 +232,12 @@ fn process_node_width(id: u32) {
         return;
     }
 
+    let border_h = nodes[id].border_left_width + nodes[id].border_right_width;
+
     if (count == 0u) {
         // Pass 1: Measure with infinite width
         let result = layout_text(id, 100000.0, false);
-        nodes[id].natural_content_width = result.width + nodes[id].padding_left + nodes[id].padding_right;
+        nodes[id].natural_content_width = result.width + nodes[id].padding_left + nodes[id].padding_right + border_h;
     } else {
         var result_width = 0.0;
         let start = nodes[id].child_start_index;
@@ -238,7 +257,7 @@ fn process_node_width(id: u32) {
                 }
             }
         }
-        nodes[id].natural_content_width = result_width + nodes[id].padding_left + nodes[id].padding_right;
+        nodes[id].natural_content_width = result_width + nodes[id].padding_left + nodes[id].padding_right + border_h;
     }
 }
 
@@ -267,7 +286,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             } else {
                 // Relative/Flex
-                let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right);
+                let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
                 
                 if (nodes[parent_id].flex_direction == 1u) { // Column
                     if (nodes[id].fixed_width >= 0.0) {
@@ -279,7 +298,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     if (nodes[id].fixed_width >= 0.0) {
                         nodes[id].final_width = nodes[id].fixed_width;
                     } else {
-                        let parent_natural_inner = max(0.0, nodes[parent_id].natural_content_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right);
+                        let parent_natural_inner = max(0.0, nodes[parent_id].natural_content_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
                         let my_negotiated_outer = get_negotiated_outer_width(id);
                         
                         if (parent_natural_inner > 0.0) {
@@ -342,10 +361,12 @@ fn process_node_height(id: u32) {
     }
 
     let count = nodes[id].child_count;
+    let border_v = nodes[id].border_top_width + nodes[id].border_bottom_width;
+
     if (count == 0u) {
-        let available_text_width = max(0.0, nodes[id].final_width - nodes[id].padding_left - nodes[id].padding_right);
+        let available_text_width = max(0.0, nodes[id].final_width - nodes[id].padding_left - nodes[id].padding_right - nodes[id].border_left_width - nodes[id].border_right_width);
         let result = layout_text(id, available_text_width, true);
-        nodes[id].desired_height = result.height + nodes[id].padding_top + nodes[id].padding_bottom;
+        nodes[id].desired_height = result.height + nodes[id].padding_top + nodes[id].padding_bottom + border_v;
     } else {
         var result_height = 0.0;
         let start = nodes[id].child_start_index;
@@ -363,7 +384,7 @@ fn process_node_height(id: u32) {
                 }
             }
         }
-        nodes[id].desired_height = result_height + nodes[id].padding_top + nodes[id].padding_bottom;
+        nodes[id].desired_height = result_height + nodes[id].padding_top + nodes[id].padding_bottom + border_v;
     }
 }
 
@@ -387,13 +408,13 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
             nodes[id].final_height = nodes[id].desired_height;
 
             if (nodes[id].position_mode == 1u) { // Absolute
-                 nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[id].left_offset + nodes[id].margin_left;
-                 nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[id].top_offset + nodes[id].margin_top;
+                 nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].left_offset + nodes[id].margin_left;
+                 nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].top_offset + nodes[id].margin_top;
             } else { // Relative
                 if (nodes[parent_id].flex_direction == 1u) { // Column
-                    nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[id].margin_left;
+                    nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].margin_left;
                     
-                    var y_cursor = nodes[parent_id].final_y + nodes[parent_id].padding_top;
+                    var y_cursor = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width;
                     let start = nodes[parent_id].child_start_index;
                     
                     // Sum previous siblings only if they are relative
@@ -405,9 +426,9 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     nodes[id].final_y = y_cursor + nodes[id].margin_top;
                     
                 } else { // Row
-                    nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[id].margin_top;
+                    nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].margin_top;
                     
-                    var x_cursor = nodes[parent_id].final_x + nodes[parent_id].padding_left;
+                    var x_cursor = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width;
                     let start = nodes[parent_id].child_start_index;
                     
                      // Sum previous siblings only if they are relative
@@ -452,6 +473,20 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].margin_right = 0.0;
     nodes[id].margin_bottom = 0.0;
     nodes[id].margin_left = 0.0;
+    nodes[id].border_top_width = 0.0;
+    nodes[id].border_right_width = 0.0;
+    nodes[id].border_bottom_width = 0.0;
+    nodes[id].border_left_width = 0.0;
+    nodes[id].border_color_top = 0u;
+    nodes[id].border_color_right = 0u;
+    nodes[id].border_color_bottom = 0u;
+    nodes[id].border_color_left = 0u;
+    nodes[id].outline_width = 0.0;
+    nodes[id].outline_offset = 0.0;
+    nodes[id].outline_color_top = 0u;
+    nodes[id].outline_color_right = 0u;
+    nodes[id].outline_color_bottom = 0u;
+    nodes[id].outline_color_left = 0u;
 
     let list_offset = nodes[id].class_data_offset;
     let count = node_class_list[list_offset];
@@ -531,6 +566,62 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 case PROP_MARGIN_LEFT: {
                     nodes[id].margin_left = bitcast<f32>(class_defs[pos]);
                     pos = pos + 2u;
+                }
+                case PROP_BORDER_TOP_WIDTH: {
+                    nodes[id].border_top_width = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BORDER_RIGHT_WIDTH: {
+                    nodes[id].border_right_width = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BORDER_BOTTOM_WIDTH: {
+                    nodes[id].border_bottom_width = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BORDER_LEFT_WIDTH: {
+                    nodes[id].border_left_width = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_BORDER_COLOR_TOP: {
+                    nodes[id].border_color_top = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_BORDER_COLOR_RIGHT: {
+                    nodes[id].border_color_right = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_BORDER_COLOR_BOTTOM: {
+                    nodes[id].border_color_bottom = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_BORDER_COLOR_LEFT: {
+                    nodes[id].border_color_left = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_OUTLINE_WIDTH: {
+                    nodes[id].outline_width = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_OUTLINE_OFFSET: {
+                    nodes[id].outline_offset = bitcast<f32>(class_defs[pos]);
+                    pos = pos + 2u;
+                }
+                case PROP_OUTLINE_COLOR_TOP: {
+                    nodes[id].outline_color_top = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_OUTLINE_COLOR_RIGHT: {
+                    nodes[id].outline_color_right = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_OUTLINE_COLOR_BOTTOM: {
+                    nodes[id].outline_color_bottom = class_defs[pos];
+                    pos = pos + 1u;
+                }
+                case PROP_OUTLINE_COLOR_LEFT: {
+                    nodes[id].outline_color_left = class_defs[pos];
+                    pos = pos + 1u;
                 }
                 default: {
                     // Unknown property — skip 1 u32 and hope for the best

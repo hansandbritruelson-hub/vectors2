@@ -38,6 +38,8 @@
   background: #2aae23ff;
   margin-right: 15px;
   padding: 20px;
+  border: 4px solid #ae2323ff;
+  outline: 8px solid #ae9b23ff;
 }
 .nav-item:hover {
   background: #27bb67ff;
