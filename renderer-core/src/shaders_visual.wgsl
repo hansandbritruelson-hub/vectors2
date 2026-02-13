@@ -229,7 +229,7 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
 
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
-    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0); // White Text
+    out.color = vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red Text (Debug Visibility)
     out.local_pos = corner - vec2(1.0, 1.0);
     out.glyph_index = char.glyph_index;
     out.flags = 0u; // Text typically doesn't use these flags in FS, but be safe

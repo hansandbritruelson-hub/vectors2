@@ -367,7 +367,7 @@ pub struct GpuNode {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape
+    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input
     pub natural_content_width: f32,
 
     // --- Texture Atlas UVs ---
@@ -459,6 +459,10 @@ pub struct CpuNode {
     
     // Events
     pub on_click: Option<std::rc::Rc<dyn Fn()>>,
+    
+    // Input Support
+    pub input_type: Option<String>,
+    pub on_update_model_value: Option<std::rc::Rc<dyn Fn(String)>>,
 
     pub scope: Option<crate::signals::ScopeId>,
 }
@@ -489,6 +493,8 @@ impl CpuNode {
             inline_styles: HashMap::new(),
             cached_texture: None,
             on_click: None,
+            input_type: None,
+            on_update_model_value: None,
             scope: None,
         }
     }
@@ -572,6 +578,7 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub root_scope_id: Option<crate::signals::ScopeId>,
 
+    pub focused_node: Option<u32>,
     pub dirty: bool,
 }
 
@@ -602,6 +609,7 @@ impl FlexEngine {
             stylesheet: StyleSheet::default(),
             free_nodes: Vec::new(),
             root_scope_id: None,
+            focused_node: None,
             dirty: false, // Start clean, mark_dirty will be called during build_ui
         };
         
@@ -1565,14 +1573,75 @@ impl FlexEngine {
                         callbacks.push(cb.clone());
                         break;
                     }
+                    
+                    // Focus handling for inputs
+                    if node.input_type.is_some() {
+                        self.focused_node = Some(cpu_idx as u32);
+                        log(&format!("Focused Input Node: {}", cpu_idx));
+                    } else if current_cpu_idx == Some(initial_cpu_idx) {
+                        // If we clicked something else and it's the leaf, clear focus
+                        // (Rough focus-loss logic)
+                        self.focused_node = None;
+                    }
+
                     current_cpu_idx = node.parent;
                 } else {
                     break;
                 }
             }
+        } else {
+            // Clicked empty space
+            self.focused_node = None;
         }
 
         callbacks
+    }
+
+    pub fn handle_keydown(&mut self, key: String) -> Option<(std::rc::Rc<dyn Fn(String)>, String)> {
+        let node_id = match self.focused_node {
+            Some(id) => id,
+            None => return None,
+        };
+
+        let (current_text, input_type, on_update) = {
+            let node = match self.cpu_nodes.get(node_id as usize) {
+                Some(n) => n,
+                None => return None,
+            };
+            
+            (
+                node.text.clone().unwrap_or_default(),
+                node.input_type.clone().unwrap_or_else(|| "text".to_string()),
+                node.on_update_model_value.clone()
+            )
+        };
+
+        let mut next_text = current_text.clone();
+
+        if key == "Backspace" {
+            next_text.pop();
+        } else if key.len() == 1 {
+            // Validation based on type
+            let c = key.chars().next().unwrap();
+            let mut allowed = true;
+            
+            if input_type == "float64" {
+                allowed = c.is_ascii_digit() || c == '.' || (c == '-' && next_text.is_empty());
+            } else if input_type == "int64" {
+                allowed = c.is_ascii_digit() || (c == '-' && next_text.is_empty());
+            }
+
+            if allowed {
+                next_text.push(c);
+            }
+        }
+
+        if next_text != current_text {
+            if let Some(cb) = on_update {
+                return Some((cb, next_text));
+            }
+        }
+        None
     }
 
     pub fn add_image_to_atlas(&mut self, id: String, width: u32, height: u32, data: Vec<u8>) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {

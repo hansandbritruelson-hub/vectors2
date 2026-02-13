@@ -5,7 +5,7 @@
 use renderer_core::signals::{
     create_effect, create_memo, create_signal, ReadSignal, ToBool, ToReactiveString,
 };
-use renderer_core::ui::{div, mount_if, mount_list, text, Element};
+use renderer_core::ui::{div, input, mount_if, mount_list, text, Element};
 use renderer_core::FlexEngine;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -54,24 +54,24 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     {
         let mut decls = std::collections::HashMap::new();
         decls.insert(
-            "background-color".to_string(),
-            renderer_core::StyleValue::Color(0.101960786f32, 0.101960786f32, 0.101960786f32, 1f32),
+            "padding-left".to_string(),
+            renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
             "padding-bottom".to_string(),
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
-            "padding-left".to_string(),
-            renderer_core::StyleValue::Px(20f32),
+            "flex-direction".to_string(),
+            renderer_core::StyleValue::Ident("column".to_string()),
         );
         decls.insert(
             "padding-right".to_string(),
             renderer_core::StyleValue::Px(20f32),
         );
         decls.insert(
-            "flex-direction".to_string(),
-            renderer_core::StyleValue::Ident("column".to_string()),
+            "background-color".to_string(),
+            renderer_core::StyleValue::Color(0.101960786f32, 0.101960786f32, 0.101960786f32, 1f32),
         );
         decls.insert(
             "padding-top".to_string(),
@@ -97,6 +97,15 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     }
     {
         let mut decls = std::collections::HashMap::new();
+        decls.insert("height".to_string(), renderer_core::StyleValue::Px(300f32));
+        decls.insert(
+            "justify-content".to_string(),
+            renderer_core::StyleValue::Ident("center".to_string()),
+        );
+        decls.insert(
+            "align-items".to_string(),
+            renderer_core::StyleValue::Ident("center".to_string()),
+        );
         decls.insert(
             "border-radius".to_string(),
             renderer_core::StyleValue::Px(8f32),
@@ -104,15 +113,6 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
         decls.insert(
             "background-color".to_string(),
             renderer_core::StyleValue::Color(0.16470589f32, 0.16470589f32, 0.16470589f32, 1f32),
-        );
-        decls.insert(
-            "justify-content".to_string(),
-            renderer_core::StyleValue::Ident("center".to_string()),
-        );
-        decls.insert("height".to_string(), renderer_core::StyleValue::Px(300f32));
-        decls.insert(
-            "align-items".to_string(),
-            renderer_core::StyleValue::Ident("center".to_string()),
         );
         decls.insert(
             "margin-bottom".to_string(),
@@ -126,14 +126,14 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             "justify-content".to_string(),
             renderer_core::StyleValue::Ident("center".to_string()),
         );
+        decls.insert(
+            "border-radius".to_string(),
+            renderer_core::StyleValue::Px(4f32),
+        );
         decls.insert("height".to_string(), renderer_core::StyleValue::Px(100f32));
         decls.insert(
             "align-items".to_string(),
             renderer_core::StyleValue::Ident("center".to_string()),
-        );
-        decls.insert(
-            "border-radius".to_string(),
-            renderer_core::StyleValue::Px(4f32),
         );
         decls.insert(
             "background-color".to_string(),

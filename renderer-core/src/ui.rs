@@ -27,7 +27,7 @@ pub struct Element {
     image_id: Option<String>,
     flags: u32,
 
-    text_signal: Option<ReadSignal<String>>,
+    value_signal: Option<ReadSignal<String>>,
     flags_signal: Option<ReadSignal<u32>>,
     
     on_click: Option<Rc<dyn Fn()>>,
@@ -35,6 +35,9 @@ pub struct Element {
     inline_styles: HashMap<String, crate::StyleValue>,
     children: Vec<Element>,
     path_data: Option<String>,
+    
+    input_type: Option<String>,
+    on_update_model_value: Option<Rc<dyn Fn(String)>>,
 }
 
 impl Element {
@@ -43,13 +46,15 @@ impl Element {
             text_content: None,
             image_id: None,
             flags: 1, // Visible
-            text_signal: None,
+            value_signal: None,
             flags_signal: None,
             on_click: None,
             classes: Vec::new(),
             inline_styles: HashMap::new(),
             children: Vec::new(),
             path_data: None,
+            input_type: None,
+            on_update_model_value: None,
         }
     }
 
@@ -78,13 +83,19 @@ impl Element {
     pub fn z(self, z: f32) -> Self { self.style("z-index", crate::StyleValue::Px(z)) }
     pub fn child(mut self, child: Element) -> Self { self.children.push(child); self }
     pub fn on_click<F: Fn() + 'static>(mut self, f: F) -> Self { self.on_click = Some(Rc::new(f)); self }
-
-    pub fn bind_text(mut self, signal: ReadSignal<String>) -> Self { self.text_signal = Some(signal); self }
+    pub fn value(mut self, signal: ReadSignal<String>) -> Self { self.value_signal = Some(signal); self }
+    pub fn bind_text(self, signal: ReadSignal<String>) -> Self { self.value(signal) } // Deprecated
     pub fn bind_flags(mut self, signal: ReadSignal<u32>) -> Self { self.flags_signal = Some(signal); self }
 
     pub fn text(mut self, s: &str) -> Self { self.text_content = Some(s.to_string()); self }
     pub fn image(mut self, id: &str) -> Self { self.image_id = Some(id.to_string()); self }
     pub fn path(mut self, d: &str) -> Self { self.path_data = Some(d.to_string()); self }
+    
+    pub fn input_type(mut self, t: &str) -> Self { self.input_type = Some(t.to_string()); self }
+    pub fn on_update_model_value<F: Fn(String) + 'static>(mut self, f: F) -> Self {
+        self.on_update_model_value = Some(Rc::new(f));
+        self
+    }
 
 
     pub fn build(self, engine: Rc<RefCell<FlexEngine>>, parent: Option<u32>) -> u32 {
@@ -104,6 +115,11 @@ impl Element {
             if let Some(id) = self.image_id { node.image_asset_id = Some(id); }
             if let Some(p) = self.path_data { node.shape_data = Some(p); }
             if let Some(f) = self.on_click { node.on_click = Some(f); }
+            if let Some(t) = self.input_type { 
+                node.input_type = Some(t); 
+                node.flags |= 8; // Bit 3 = Is Input
+            }
+            if let Some(f) = self.on_update_model_value { node.on_update_model_value = Some(f); }
 
             
             if let Some(p) = parent {
@@ -125,7 +141,7 @@ impl Element {
              });
         }
 
-        if let Some(sig) = self.text_signal {
+        if let Some(sig) = self.value_signal {
              let engine_weak = Rc::downgrade(&engine);
              create_effect(move || {
                  if let Some(engine) = engine_weak.upgrade() {
@@ -145,6 +161,7 @@ impl Element {
 
 pub fn div() -> Element { Element::new() }
 pub fn text(content: &str) -> Element { Element::new().text(content) }
+pub fn input() -> Element { Element::new() }
 
 // --- Block System ---
 

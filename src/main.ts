@@ -76,6 +76,11 @@ async function run() {
         await renderer.handle_click(x, y);
     });
 
+    window.addEventListener('keydown', (e) => {
+        if (!renderer) return;
+        renderer.handle_keydown(e.key);
+    });
+
     // Expose debug for manual inspection
     (window as any).debugRenderer = () => {
         if (renderer) renderer.debug();

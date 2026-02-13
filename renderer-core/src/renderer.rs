@@ -836,9 +836,15 @@ impl FlexRenderer {
             for cb in callbacks {
                 cb();
             }
-            
             Ok(JsValue::UNDEFINED)
         })
+    }
+
+    pub fn handle_keydown(&self, key: String) {
+        let result = self.engine.borrow_mut().handle_keydown(key);
+        if let Some((cb, val)) = result {
+            cb(val);
+        }
     }
 
     fn rebind_all(&mut self) {
