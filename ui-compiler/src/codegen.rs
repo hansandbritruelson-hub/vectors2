@@ -493,7 +493,27 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         }
     }
 
-    let child_codes: Vec<TokenStream> = el.children.iter().map(|c| {
+    let mut current_el = el.clone();
+
+    if el.children.len() == 1 {
+        match &el.children[0] {
+            Node::Text(t) => {
+                builder = quote! { #builder.text(#t) };
+                current_el.children = Vec::new();
+            }
+            Node::Binding(b) => {
+                let expr: syn::Expr = syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+                builder = quote! { #builder.value(create_memo({
+                    let val = #expr.clone();
+                    move || val.to_reactive_string()
+                })) };
+                current_el.children = Vec::new();
+            }
+            _ => {}
+        }
+    }
+
+    let child_codes: Vec<TokenStream> = current_el.children.iter().map(|c| {
         let code = generate_node(c, Some(&node_var.to_string()), id_gen);
         quote! { #code; }
     }).collect();

@@ -29,6 +29,7 @@
     </div>
     
     <div class="view-content">
+      <div class="font-size-test">THIS IS FONT SIZE 100PX TEST</div>
       <Image v-if="view == 'image'" />
       <Video v-if="view == 'video'" />
     </div>
@@ -141,6 +142,12 @@
 .view-content {
   flex-grow: 1;
   flex-direction: column;
+}
+
+.font-size-test {
+  font-size: 100px;
+  color: #f1c40f;
+  margin: 20px;
 }
 
 .spacer {

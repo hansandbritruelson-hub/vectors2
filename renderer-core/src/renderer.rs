@@ -57,6 +57,7 @@ pub struct FlexRenderer {
     pipeline_render: Option<GpuRenderPipeline>,
     pipeline_render_text: Option<GpuRenderPipeline>,
     pipeline_resolve_styles: Option<GpuComputePipeline>,
+    pipeline_inherit_styles: Option<GpuComputePipeline>,
 
     bind_group_compute: Option<GpuBindGroup>,
     bind_group_render: Option<GpuBindGroup>,
@@ -108,6 +109,7 @@ impl FlexRenderer {
             pipeline_render: None,
             pipeline_render_text: None,
             pipeline_resolve_styles: None,
+            pipeline_inherit_styles: None,
 
             bind_group_compute: None,
             bind_group_render: None,
@@ -139,6 +141,8 @@ impl FlexRenderer {
 
         let node_count = engine.get_node_count() as u32;
         let node_size = engine.get_node_size() as u32;
+        
+        log(&format!("Renderer init: node_count={}, node_size={}", node_count, node_size));
         let nodes_byte_length = if node_count == 0 { 4 } else { node_count * node_size };
 
         self.nodes_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
@@ -283,6 +287,7 @@ impl FlexRenderer {
 
         self.pipeline_reset_signals = Some(create_compute("reset_signals"));
         self.pipeline_resolve_styles = Some(create_compute("resolve_styles"));
+        self.pipeline_inherit_styles = Some(create_compute("inherit_styles"));
         self.pipeline_bottom_up = Some(create_compute("width_bottom_up"));
         self.pipeline_top_down = Some(create_compute("width_top_down"));
         self.pipeline_height_bottom_up = Some(create_compute("height_bottom_up"));
@@ -697,6 +702,22 @@ impl FlexRenderer {
         {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_resolve_styles.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
+            dispatch(&pass, workgroups);
+            end_compute(&pass);
+        }
+
+        // PASS 0.1: Inherit Styles
+        {
+            let pass = command_encoder.begin_compute_pass();
+            pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
+            dispatch(&pass, workgroups);
+            end_compute(&pass);
+        }
+        for _ in 0..16 {
+            let pass = command_encoder.begin_compute_pass();
+            pass.set_pipeline_compute(self.pipeline_inherit_styles.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);

@@ -429,11 +429,14 @@ pub struct GpuNode {
     pub text_color_g: f32,
     pub text_color_b: f32,
     pub text_color_a: f32,
+
+    pub font_size: f32,
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 256);
+    // Adding f32 (4 bytes) to GpuNode. 256 + 4 = 260.
+    assert_eq!(std::mem::size_of::<GpuNode>(), 260);
 }
 
 impl GpuNode {
@@ -500,6 +503,7 @@ impl GpuNode {
             box_shadow_blur: 0.0,
             box_shadow_spread: 0.0,
             box_shadow_color: 0,
+            font_size: 24.0,
         }
     }
 }
@@ -547,6 +551,7 @@ pub struct CpuNode {
 
     pub scope: Option<crate::signals::ScopeId>,
     pub hovered: bool,
+    pub font_size: f32,
 }
 
 impl CpuNode {
@@ -579,6 +584,7 @@ impl CpuNode {
             on_update_model_value: None,
             scope: None,
             hovered: false,
+            font_size: 24.0,
         }
     }
 }
@@ -732,8 +738,8 @@ impl FlexEngine {
         // Simple fixed size for demo
         let face = Face::parse(FONT_DATA, 0).expect("Error parsing font");
         let units_per_em = face.units_per_em() as f32;
-        let font_size = 24.0; // Fixed 24px font size for now
-        let scale = font_size / units_per_em;
+        // let font_size = 24.0; // REMOVED: No longer scaling to fixed 24px here
+        let scale = 1.0 / units_per_em; // Normalized to 1.0 EM units
 
         self.ascender = face.ascender() as f32 * scale;
         self.descender = face.descender() as f32 * scale;
@@ -770,10 +776,10 @@ impl FlexEngine {
             let _rect = bbox; // Alias for clarity if needed, or just use bbox
             self.glyph_data.push(GlyphData {
                 advance,
-                bearing_x: bbox.x_min as f32 * scale - 1.0, // 1px padding
-                bearing_y: bbox.y_max as f32 * scale + 1.0,
-                width: (bbox.x_max - bbox.x_min) as f32 * scale + 2.0,
-                height: (bbox.y_max - bbox.y_min) as f32 * scale + 2.0,
+                bearing_x: bbox.x_min as f32 * scale, 
+                bearing_y: bbox.y_max as f32 * scale,
+                width: (bbox.x_max - bbox.x_min) as f32 * scale,
+                height: (bbox.y_max - bbox.y_min) as f32 * scale,
                 _pad0: 0.0, _pad1: 0.0, _pad2: 0.0,
             });
         }
@@ -1031,6 +1037,9 @@ impl FlexEngine {
                             _ => {}
                         }
                     }
+                }
+                "font-size" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].font_size = v; }
                 }
                 _ => {}
             }
@@ -1482,6 +1491,19 @@ impl FlexEngine {
                     self.class_defs.push(0);
                 }
             }
+            "font-size" => {
+                self.class_defs.push(PROP_FONT_SIZE);
+                match val {
+                    StyleValue::Px(v) => {
+                        self.class_defs.push(v.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                    _ => {
+                        self.class_defs.push(24f32.to_bits());
+                        self.class_defs.push(UNIT_PX);
+                    }
+                }
+            }
             _ => {} // Unsupported properties silently ignored
         }
     }
@@ -1683,6 +1705,7 @@ impl FlexEngine {
             });
             let cn_text = self.cpu_nodes[cpu_idx].text.clone();
             let cn_shape_data = self.cpu_nodes[cpu_idx].shape_data.clone();
+            let cn_font_size = self.cpu_nodes[cpu_idx].font_size;
             
             // Calculate Children Range
             let start_child_gpu_idx = self.gpu_nodes.len() as u32;
@@ -1782,6 +1805,8 @@ impl FlexEngine {
                          gpu_node.flags |= 4; // Bit 2 = Shape
                      }
                 }
+
+                gpu_node.font_size = cn_font_size;
             }
         }
     }

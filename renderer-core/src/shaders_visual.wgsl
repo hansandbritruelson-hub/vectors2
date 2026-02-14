@@ -83,6 +83,8 @@ struct Node {
     text_color_g: f32,
     text_color_b: f32,
     text_color_a: f32,
+
+    font_size: f32,
 };
 
 struct Character {
@@ -306,35 +308,43 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
         return out;
     }
 
+    let font_size = node.font_size;
     let base_x = node.final_x + char.x;
     let base_y = node.final_y + char.y;
     let w = char.width;
     let h = char.height;
     
+    // 1px padding for AA. 
+    let padding = 1.0; 
+    
     var corner = vec2<f32>(0.0, 0.0);
-    if (vertex_index == 0u) { corner = vec2(0.0, 0.0); }
-    else if (vertex_index == 1u) { corner = vec2(w, 0.0); }
-    else if (vertex_index == 2u) { corner = vec2(0.0, h); }
-    else if (vertex_index == 3u) { corner = vec2(0.0, h); }
-    else if (vertex_index == 4u) { corner = vec2(w, 0.0); }
-    else if (vertex_index == 5u) { corner = vec2(w, h); }
+    if (vertex_index == 0u) { corner = vec2(-padding, -padding); }
+    else if (vertex_index == 1u) { corner = vec2(w + padding, -padding); }
+    else if (vertex_index == 2u) { corner = vec2(-padding, h + padding); }
+    else if (vertex_index == 3u) { corner = vec2(-padding, h + padding); }
+    else if (vertex_index == 4u) { corner = vec2(w + padding, -padding); }
+    else if (vertex_index == 5u) { corner = vec2(w + padding, h + padding); }
     
     let pos = vec2(base_x + corner.x, base_y + corner.y);
     let ndc_x = (pos.x / uniforms.screen_width) * 2.0 - 1.0;
     let ndc_y = 1.0 - (pos.y / uniforms.screen_height) * 2.0;
 
-    // Text slightly in front of background (margin 0.0001)
+    // Text slightly in front of background
     let z = 1.0 - (node.z_index / 10000.0) - 0.0001;
 
     var out: VertexOutput;
     out.position = vec4<f32>(ndc_x, ndc_y, z, 1.0);
     out.color = vec4<f32>(node.text_color_r, node.text_color_g, node.text_color_b, node.text_color_a);
-    out.local_pos = corner - vec2(1.0, 1.0);
+    
+    // Map local_pos to EM units
+    out.local_pos = corner / font_size;
+    
     out.glyph_index = char.glyph_index;
-    out.flags = 0u; // Text typically doesn't use these flags in FS, but be safe
+    out.flags = 0u;
     out.curve_start = 0u;
     out.curve_count = 0u;
     out.dimensions = vec2(0.0, 0.0);
+    out.instance_index = char.node_index;
     return out;
 }
 
@@ -344,9 +354,12 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     let info = glyph_infos[in.glyph_index];
     if (info.count == 0u) { discard; }
 
+    let node = nodes[in.instance_index];
+    let pixel_size = 1.0 / node.font_size;
+
     var total_coverage = 0.0;
     let SAMPLES = 4u;
-    let STEP = 1.0 / f32(SAMPLES);
+    let STEP = pixel_size / f32(SAMPLES);
     
     for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
         for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {

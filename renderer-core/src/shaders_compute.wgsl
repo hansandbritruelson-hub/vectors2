@@ -83,6 +83,8 @@ struct Node {
     text_color_g: f32,
     text_color_b: f32,
     text_color_a: f32,
+
+    font_size: f32,
 };
 
 struct Character {
@@ -151,6 +153,9 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
     var cursor_y = 0.0;
     var max_x = 0.0;
     
+    let font_size = nodes[node_id].font_size;
+    let scale = font_size;
+    
     // Safety check for empty text
     if (len == 0u) {
         return LayoutResult(0.0, 0.0);
@@ -165,24 +170,24 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
         let advance = glyph.advance;
         
         // Word wrap check
-        if (cursor_x + advance > max_width + 0.01 && cursor_x > 0.0) {
+        if (cursor_x + advance * scale > max_width + 0.01 && cursor_x > 0.0) {
             cursor_x = 0.0;
-            cursor_y += line_height;
+            cursor_y += line_height * scale;
         }
         
         if (write_output) {
-            characters[idx].x = cursor_x + glyph.bearing_x;
-            characters[idx].y = cursor_y + font_ascender - glyph.bearing_y; 
-            characters[idx].width = glyph.width;
-            characters[idx].height = glyph.height;
+            characters[idx].x = cursor_x + glyph.bearing_x * scale;
+            characters[idx].y = cursor_y + font_ascender * scale - glyph.bearing_y * scale; 
+            characters[idx].width = glyph.width * scale;
+            characters[idx].height = glyph.height * scale;
         }
         
-        cursor_x += advance;
+        cursor_x += advance * scale;
         
         max_x = max(max_x, cursor_x);
     }
     
-    return LayoutResult(max_x, cursor_y + line_height);
+    return LayoutResult(max_x, cursor_y + line_height * scale);
 }
 
 // PASS 1: Natural Width (Bottom-Up)
@@ -501,6 +506,7 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].text_color_g = 1.0;
     nodes[id].text_color_b = 1.0;
     nodes[id].text_color_a = 1.0;
+    nodes[id].font_size = 24.0;
 
     let is_hovered = (nodes[id].flags & 16u) != 0u;
     let list_offset = nodes[id].class_data_offset;
@@ -766,8 +772,49 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                     pos = pos + 4u;
                 }
+                case 37u: { // PROP_FONT_SIZE
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].font_size = val; }
+                    }
+                    pos = pos + 2u;
+                }
                 default: { break; }
             }
         }
+    }
+}
+
+// PASS 0.5: Inherit Styles
+@compute @workgroup_size(64)
+fn inherit_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let id = global_id.x;
+    if (id >= u32(uniforms.node_count)) {
+        return;
+    }
+
+    let parent_id = nodes[id].parent_index;
+    if (parent_id == id) {
+        atomicStore(&nodes[id].signals_finished, 1u);
+        return;
+    }
+
+    if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
+        // Basic Inheritance Heuristic: 
+        // If font_size is still 24.0 (default), inherit from parent.
+        if (nodes[id].font_size == 24.0) {
+            nodes[id].font_size = nodes[parent_id].font_size;
+        }
+        
+        // Inherit text color if default white (1.0, 1.0, 1.0, 1.0)
+        if (nodes[id].text_color_r == 1.0 && nodes[id].text_color_g == 1.0 && nodes[id].text_color_b == 1.0 && nodes[id].text_color_a == 1.0) {
+            nodes[id].text_color_r = nodes[parent_id].text_color_r;
+            nodes[id].text_color_g = nodes[parent_id].text_color_g;
+            nodes[id].text_color_b = nodes[parent_id].text_color_b;
+            nodes[id].text_color_a = nodes[parent_id].text_color_a;
+        }
+
+        atomicStore(&nodes[id].signals_finished, 1u);
     }
 }
