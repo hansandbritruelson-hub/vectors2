@@ -140,6 +140,9 @@ extern "C" {
     #[wasm_bindgen(method, js_name = writeBuffer)]
     pub fn write_buffer_with_f64_and_js_value(this: &GpuQueue, buffer: &GpuBuffer, buffer_offset: f64, data: &JsValue);
 
+    #[wasm_bindgen(method, js_name = writeBuffer)]
+    pub fn write_buffer_with_u8_array(this: &GpuQueue, buffer: &GpuBuffer, buffer_offset: f64, data: &[u8]);
+
     #[wasm_bindgen(method, js_name = writeTexture)]
     pub fn write_texture_with_u8_array(this: &GpuQueue, destination: &Object, data: &[u8], data_layout: &Object, size: &Object);
 

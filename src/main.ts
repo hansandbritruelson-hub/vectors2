@@ -76,15 +76,12 @@ async function run() {
         await renderer.handle_click(x, y);
     });
 
-    window.addEventListener('click', (e) => {
+    canvas.addEventListener('mousemove', (e) => {
         if (renderer) {
-            renderer.handle_click(e.clientX, e.clientY);
-        }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (renderer) {
-            renderer.handle_mousemove(e.clientX, e.clientY);
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            renderer.handle_mousemove(x, y);
         }
     });
 

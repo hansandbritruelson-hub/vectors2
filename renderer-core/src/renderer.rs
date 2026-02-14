@@ -161,9 +161,14 @@ impl FlexRenderer {
         ));
 
         if char_count > 0 {
-             let char_data = engine.get_characters_buffer();
-             let char_vec = char_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_js_value(&chars_buf, 0.0, &js_sys::Uint8Array::from(char_vec.as_slice()).into());
+             let engine = self.engine.borrow();
+             let char_data = unsafe {
+                 std::slice::from_raw_parts(
+                     engine.characters.as_ptr() as *const u8,
+                     engine.characters.len() * std::mem::size_of::<crate::Character>()
+                 )
+             };
+             self.device.queue().write_buffer_with_u8_array(&chars_buf, 0.0, char_data);
         }
         self.characters_buffer = Some(chars_buf);
 
@@ -178,9 +183,14 @@ impl FlexRenderer {
         ));
 
         if glyph_count > 0 {
-            let glyph_data = engine.get_glyph_data_buffer();
-            let glyph_vec = glyph_data.to_vec();
-            self.device.queue().write_buffer_with_f64_and_js_value(&glyph_buf, 0.0, &js_sys::Uint8Array::from(glyph_vec.as_slice()).into());
+            let engine = self.engine.borrow();
+            let glyph_data = unsafe {
+                std::slice::from_raw_parts(
+                    engine.glyph_data.as_ptr() as *const u8,
+                    engine.glyph_data.len() * std::mem::size_of::<crate::GlyphData>()
+                )
+            };
+            self.device.queue().write_buffer_with_u8_array(&glyph_buf, 0.0, glyph_data);
         }
         self.glyph_buffer = Some(glyph_buf);
         
@@ -196,8 +206,14 @@ impl FlexRenderer {
             USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC
         ));
         if curve_data.byte_length() > 0 {
-             let curve_vec = curve_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_js_value(&curve_buf, 0.0, &js_sys::Uint8Array::from(curve_vec.as_slice()).into());
+             let engine = self.engine.borrow();
+             let curve_slice = unsafe {
+                 std::slice::from_raw_parts(
+                     engine.curves.as_ptr() as *const u8,
+                     engine.curves.len() * std::mem::size_of::<crate::GpuCurve>()
+                 )
+             };
+             self.device.queue().write_buffer_with_u8_array(&curve_buf, 0.0, curve_slice);
         }
         self.curve_buffer = Some(curve_buf);
 
@@ -208,8 +224,14 @@ impl FlexRenderer {
              USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC
         ));
         if glyph_info_data.byte_length() > 0 {
-             let info_vec = glyph_info_data.to_vec();
-             self.device.queue().write_buffer_with_f64_and_js_value(&info_buf, 0.0, &js_sys::Uint8Array::from(info_vec.as_slice()).into());
+             let engine = self.engine.borrow();
+             let info_slice = unsafe {
+                 std::slice::from_raw_parts(
+                     engine.glyph_infos.as_ptr() as *const u8,
+                     engine.glyph_infos.len() * std::mem::size_of::<crate::GpuGlyphInfo>()
+                 )
+             };
+             self.device.queue().write_buffer_with_u8_array(&info_buf, 0.0, info_slice);
         }
         self.glyph_info_buffer = Some(info_buf);
 
@@ -221,8 +243,14 @@ impl FlexRenderer {
             USAGE_STORAGE | USAGE_COPY_DST
         ));
         if class_defs_data.byte_length() > 0 {
-            let vec = class_defs_data.to_vec();
-            self.device.queue().write_buffer_with_f64_and_js_value(&class_defs_buf, 0.0, &js_sys::Uint8Array::from(vec.as_slice()).into());
+            let engine = self.engine.borrow();
+            let class_defs_slice = unsafe {
+                std::slice::from_raw_parts(
+                    engine.class_defs.as_ptr() as *const u8,
+                    engine.class_defs.len() * std::mem::size_of::<u32>()
+                )
+            };
+            self.device.queue().write_buffer_with_u8_array(&class_defs_buf, 0.0, class_defs_slice);
         }
         self.class_defs_buffer = Some(class_defs_buf);
 
@@ -234,8 +262,14 @@ impl FlexRenderer {
             USAGE_STORAGE | USAGE_COPY_DST
         ));
         if ncl_data.byte_length() > 0 {
-            let vec = ncl_data.to_vec();
-            self.device.queue().write_buffer_with_f64_and_js_value(&ncl_buf, 0.0, &js_sys::Uint8Array::from(vec.as_slice()).into());
+            let engine = self.engine.borrow();
+            let ncl_slice = unsafe {
+                std::slice::from_raw_parts(
+                    engine.node_class_list.as_ptr() as *const u8,
+                    engine.node_class_list.len() * std::mem::size_of::<u32>()
+                )
+            };
+            self.device.queue().write_buffer_with_u8_array(&ncl_buf, 0.0, ncl_slice);
         }
         self.node_class_list_buffer = Some(ncl_buf);
 
@@ -431,10 +465,10 @@ impl FlexRenderer {
             }
         };
 
-        self.device.queue().write_buffer_with_f64_and_js_value(
+        self.device.queue().write_buffer_with_u8_array(
             self.uniform_buffer.as_ref().unwrap(), 
             0.0, 
-            &js_sys::Uint8Array::from(uniform_bytes.as_slice()).into()
+            &uniform_bytes
         );
 
         let node_count: u32;
@@ -465,12 +499,20 @@ impl FlexRenderer {
         }
 
         // Write Node data
-        let nodes_vec = self.engine.borrow().get_nodes_buffer().to_vec();
-        self.device.queue().write_buffer_with_f64_and_js_value(
-            self.nodes_buffer.as_ref().unwrap(),
-            0.0,
-            &js_sys::Uint8Array::from(nodes_vec.as_slice()).into()
-        );
+        {
+            let engine = self.engine.borrow();
+            let nodes_slice = unsafe {
+                std::slice::from_raw_parts(
+                    engine.gpu_nodes.as_ptr() as *const u8,
+                    engine.gpu_nodes.len() * std::mem::size_of::<crate::GpuNode>()
+                )
+            };
+            self.device.queue().write_buffer_with_u8_array(
+                self.nodes_buffer.as_ref().unwrap(),
+                0.0,
+                nodes_slice
+            );
+        }
 
         // Update Characters
         {
@@ -480,7 +522,12 @@ impl FlexRenderer {
             let chars_byte_length = char_count * char_size;
             
             if char_count > 0 {
-                 let chars_vec = engine.get_characters_buffer().to_vec();
+                 let chars_slice = unsafe {
+                     std::slice::from_raw_parts(
+                         engine.characters.as_ptr() as *const u8,
+                         engine.characters.len() * std::mem::size_of::<crate::Character>()
+                     )
+                 };
                  if let Some(old) = &self.characters_buffer {
                      old.destroy();
                  }
@@ -488,7 +535,7 @@ impl FlexRenderer {
                       (if chars_byte_length == 0 { 4 } else { chars_byte_length }) as f64,
                       0x0080 | 0x0008 | 0x0004
                  ));
-                 self.device.queue().write_buffer_with_f64_and_js_value(&new_buf, 0.0, &js_sys::Uint8Array::from(chars_vec.as_slice()).into());
+                 self.device.queue().write_buffer_with_u8_array(&new_buf, 0.0, chars_slice);
                  self.characters_buffer = Some(new_buf);
                  drop(engine);
                  self.rebind_all();
@@ -521,11 +568,16 @@ impl FlexRenderer {
                  }
 
                  let engine = self.engine.borrow();
-                 let curve_vec = engine.get_curve_buffer().to_vec();
-                 self.device.queue().write_buffer_with_f64_and_js_value(
+                 let curve_slice = unsafe {
+                     std::slice::from_raw_parts(
+                         engine.curves.as_ptr() as *const u8,
+                         engine.curves.len() * std::mem::size_of::<crate::GpuCurve>()
+                     )
+                 };
+                 self.device.queue().write_buffer_with_u8_array(
                      self.curve_buffer.as_ref().unwrap(),
-                     0.0,
-                     &js_sys::Uint8Array::from(curve_vec.as_slice()).into()
+                      0.0,
+                      curve_slice
                  );
             }
         }
@@ -556,11 +608,16 @@ impl FlexRenderer {
                  }
 
                  let engine = self.engine.borrow();
-                 let info_vec = engine.get_glyph_info_buffer().to_vec();
-                 self.device.queue().write_buffer_with_f64_and_js_value(
+                 let info_slice = unsafe {
+                     std::slice::from_raw_parts(
+                         engine.glyph_infos.as_ptr() as *const u8,
+                         engine.glyph_infos.len() * std::mem::size_of::<crate::GpuGlyphInfo>()
+                     )
+                 };
+                 self.device.queue().write_buffer_with_u8_array(
                      self.glyph_info_buffer.as_ref().unwrap(),
-                     0.0,
-                     &js_sys::Uint8Array::from(info_vec.as_slice()).into()
+                      0.0,
+                      info_slice
                  );
             }
         }
@@ -658,10 +715,15 @@ impl FlexRenderer {
                     )));
                     need_rebind = true;
                 }
-                let vec = class_defs_data.to_vec();
-                self.device.queue().write_buffer_with_f64_and_js_value(
+                let class_defs_slice = unsafe {
+                    std::slice::from_raw_parts(
+                        engine.class_defs.as_ptr() as *const u8,
+                        engine.class_defs.len() * std::mem::size_of::<u32>()
+                    )
+                };
+                self.device.queue().write_buffer_with_u8_array(
                     self.class_defs_buffer.as_ref().unwrap(), 0.0,
-                    &js_sys::Uint8Array::from(vec.as_slice()).into()
+                    class_defs_slice
                 );
             }
 
@@ -675,10 +737,15 @@ impl FlexRenderer {
                     )));
                     need_rebind = true;
                 }
-                let vec = ncl_data.to_vec();
-                self.device.queue().write_buffer_with_f64_and_js_value(
+                let ncl_slice = unsafe {
+                    std::slice::from_raw_parts(
+                        engine.node_class_list.as_ptr() as *const u8,
+                        engine.node_class_list.len() * std::mem::size_of::<u32>()
+                    )
+                };
+                self.device.queue().write_buffer_with_u8_array(
                     self.node_class_list_buffer.as_ref().unwrap(), 0.0,
-                    &js_sys::Uint8Array::from(vec.as_slice()).into()
+                    ncl_slice
                 );
             }
 
