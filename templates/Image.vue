@@ -36,7 +36,6 @@
         <div class="spacer"></div>
         <div class="user-profile">HB</div>
       </div>
-
       <div class="context-bar">
         <div class="context-tools">
           <div class="tool-icon-small">

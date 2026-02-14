@@ -387,7 +387,7 @@ pub struct GpuNode {
     pub curve_count: u32, 
 
     // --- GPU Style System ---
-    pub class_data_offset: u32,  // offset into node_class_list buffer
+    pub class_data_offset: u32,  // offset into node_class_list_and_inline_styles buffer
     
     // --- Padding ---
     pub padding_top: f32,
@@ -684,7 +684,7 @@ pub struct FlexEngine {
     #[wasm_bindgen(skip)]
     pub class_defs: Vec<u32>,         // serialized class property data
     #[wasm_bindgen(skip)]
-    pub node_class_list: Vec<u32>,    // per-node [count, offset0, offset1, ...]
+    pub node_class_list_and_inline_styles: Vec<u32>,    // per-node [count, offset0, offset1, ..., CTRL_END]
     #[wasm_bindgen(skip)]
     pub class_offsets: HashMap<String, u32>,  // selector -> offset in class_defs
 
@@ -728,7 +728,7 @@ impl FlexEngine {
             free_nodes: Vec::new(),
             root_scope_id: None,
             class_defs: Vec::new(),
-            node_class_list: Vec::new(),
+            node_class_list_and_inline_styles: Vec::new(),
             class_offsets: HashMap::new(),
             focused_node: None,
             last_hover_target: None,
@@ -1084,7 +1084,7 @@ impl FlexEngine {
     fn build_class_buffers(&mut self) {
         self.class_defs.clear();
         self.class_offsets.clear();
-        self.node_class_list.clear();
+        self.node_class_list_and_inline_styles.clear();
 
         // Group rules by base selector (e.g. .btn and .btn:hover)
         let mut grouped: HashMap<String, (HashMap<String, StyleValue>, HashMap<String, StyleValue>)> = HashMap::new();
@@ -1121,7 +1121,7 @@ impl FlexEngine {
             let mut props: Vec<_> = base_decls.keys().collect();
             props.sort();
             for prop in props {
-                self.serialize_property(prop, base_decls.get(prop).unwrap());
+                Self::serialize_property(&mut self.class_defs, prop, base_decls.get(prop).unwrap());
             }
 
             // Write hover rules if present
@@ -1130,7 +1130,7 @@ impl FlexEngine {
                 let mut h_props: Vec<_> = hover_decls.keys().collect();
                 h_props.sort();
                 for prop in h_props {
-                    self.serialize_property(prop, hover_decls.get(prop).unwrap());
+                    Self::serialize_property(&mut self.class_defs, prop, hover_decls.get(prop).unwrap());
                 }
             }
 
@@ -1148,418 +1148,420 @@ impl FlexEngine {
 
     /// Serializes a single CSS property into `class_defs`.
     /// Format: [prop_id: u32] [value data: variable u32s depending on property]
-    fn serialize_property(&mut self, prop: &str, val: &StyleValue) {
+    /// Serializes a single CSS property into the provided buffer.
+    fn serialize_property(dest: &mut Vec<u32>, prop: &str, val: &StyleValue) {
         match prop {
             "background-color" => {
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(PROP_BACKGROUND_COLOR_RGBA);
-                    self.class_defs.push(r.to_bits());
-                    self.class_defs.push(g.to_bits());
-                    self.class_defs.push(b.to_bits());
-                    self.class_defs.push(a.to_bits());
+                    dest.push(PROP_BACKGROUND_COLOR_RGBA);
+                    dest.push(r.to_bits());
+                    dest.push(g.to_bits());
+                    dest.push(b.to_bits());
+                    dest.push(a.to_bits());
                 }
             }
             "color" => {
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(PROP_TEXT_COLOR_RGBA);
-                    self.class_defs.push(r.to_bits());
-                    self.class_defs.push(g.to_bits());
-                    self.class_defs.push(b.to_bits());
-                    self.class_defs.push(a.to_bits());
+                    dest.push(PROP_TEXT_COLOR_RGBA);
+                    dest.push(r.to_bits());
+                    dest.push(g.to_bits());
+                    dest.push(b.to_bits());
+                    dest.push(a.to_bits());
                 }
             }
             "width" => {
-                self.class_defs.push(PROP_WIDTH);
+                dest.push(PROP_WIDTH);
                 match val {
                     StyleValue::Px(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
                     }
                     StyleValue::Percent(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PERCENT);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PERCENT);
                     }
                     _ => {
-                        self.class_defs.push(0f32.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
                     }
                 }
             }
             "height" => {
-                self.class_defs.push(PROP_HEIGHT);
+                dest.push(PROP_HEIGHT);
                 match val {
                     StyleValue::Px(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
                     }
                     StyleValue::Percent(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PERCENT);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PERCENT);
                     }
                     _ => {
-                        self.class_defs.push(0f32.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
                     }
                 }
             }
             "flex-direction" => {
-                self.class_defs.push(PROP_FLEX_DIRECTION);
+                dest.push(PROP_FLEX_DIRECTION);
                 if let StyleValue::Ident(s) = val {
                     match s.as_str() {
-                        "column" => self.class_defs.push(1),
-                        _ => self.class_defs.push(0), // row
+                        "column" => dest.push(1),
+                        _ => dest.push(0), // row
                     }
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "position" => {
-                self.class_defs.push(PROP_POSITION_MODE);
+                dest.push(PROP_POSITION_MODE);
                 if let StyleValue::Ident(s) = val {
                     match s.as_str() {
-                        "absolute" => self.class_defs.push(1),
-                        _ => self.class_defs.push(0), // relative
+                        "absolute" => dest.push(1),
+                        _ => dest.push(0), // relative
                     }
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "top" => {
-                self.class_defs.push(PROP_TOP);
+                dest.push(PROP_TOP);
                 match val {
                     StyleValue::Px(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
                     }
                     _ => {
-                        self.class_defs.push(0f32.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
                     }
                 }
             }
             "left" => {
-                self.class_defs.push(PROP_LEFT);
+                dest.push(PROP_LEFT);
                 match val {
                     StyleValue::Px(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
                     }
                     _ => {
-                        self.class_defs.push(0f32.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
                     }
                 }
             }
             "z-index" => {
-                self.class_defs.push(PROP_Z_INDEX);
+                dest.push(PROP_Z_INDEX);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
+                    dest.push(v.to_bits());
                 } else {
-                    self.class_defs.push(0f32.to_bits());
+                    dest.push(0f32.to_bits());
                 }
             }
             "padding-top" => {
-                self.class_defs.push(PROP_PADDING_TOP);
+                dest.push(PROP_PADDING_TOP);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "padding-right" => {
-                self.class_defs.push(PROP_PADDING_RIGHT);
+                dest.push(PROP_PADDING_RIGHT);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "padding-bottom" => {
-                self.class_defs.push(PROP_PADDING_BOTTOM);
+                dest.push(PROP_PADDING_BOTTOM);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "padding-left" => {
-                self.class_defs.push(PROP_PADDING_LEFT);
+                dest.push(PROP_PADDING_LEFT);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "margin-top" => {
-                self.class_defs.push(PROP_MARGIN_TOP);
+                dest.push(PROP_MARGIN_TOP);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "margin-right" => {
-                self.class_defs.push(PROP_MARGIN_RIGHT);
+                dest.push(PROP_MARGIN_RIGHT);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "margin-bottom" => {
-                self.class_defs.push(PROP_MARGIN_BOTTOM);
+                dest.push(PROP_MARGIN_BOTTOM);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "margin-left" => {
-                self.class_defs.push(PROP_MARGIN_LEFT);
+                dest.push(PROP_MARGIN_LEFT);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "border-top-width" => {
-                self.class_defs.push(PROP_BORDER_TOP_WIDTH);
+                dest.push(PROP_BORDER_TOP_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "border-right-width" => {
-                self.class_defs.push(PROP_BORDER_RIGHT_WIDTH);
+                dest.push(PROP_BORDER_RIGHT_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "border-bottom-width" => {
-                self.class_defs.push(PROP_BORDER_BOTTOM_WIDTH);
+                dest.push(PROP_BORDER_BOTTOM_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "border-left-width" => {
-                self.class_defs.push(PROP_BORDER_LEFT_WIDTH);
+                dest.push(PROP_BORDER_LEFT_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "border-color-top" => {
-                self.class_defs.push(PROP_BORDER_COLOR_TOP);
+                dest.push(PROP_BORDER_COLOR_TOP);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "border-color-right" => {
-                self.class_defs.push(PROP_BORDER_COLOR_RIGHT);
+                dest.push(PROP_BORDER_COLOR_RIGHT);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "border-color-bottom" => {
-                self.class_defs.push(PROP_BORDER_COLOR_BOTTOM);
+                dest.push(PROP_BORDER_COLOR_BOTTOM);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "border-color-left" => {
-                self.class_defs.push(PROP_BORDER_COLOR_LEFT);
+                dest.push(PROP_BORDER_COLOR_LEFT);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "outline-width" => {
-                self.class_defs.push(PROP_OUTLINE_WIDTH);
+                dest.push(PROP_OUTLINE_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "outline-offset" => {
-                self.class_defs.push(PROP_OUTLINE_OFFSET);
+                dest.push(PROP_OUTLINE_OFFSET);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "outline-color-top" => {
-                self.class_defs.push(PROP_OUTLINE_COLOR_TOP);
+                dest.push(PROP_OUTLINE_COLOR_TOP);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "outline-color-right" => {
-                self.class_defs.push(PROP_OUTLINE_COLOR_RIGHT);
+                dest.push(PROP_OUTLINE_COLOR_RIGHT);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "outline-color-bottom" => {
-                self.class_defs.push(PROP_OUTLINE_COLOR_BOTTOM);
+                dest.push(PROP_OUTLINE_COLOR_BOTTOM);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "outline-color-left" => {
-                self.class_defs.push(PROP_OUTLINE_COLOR_LEFT);
+                dest.push(PROP_OUTLINE_COLOR_LEFT);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "box-shadow-h-offset" => {
-                self.class_defs.push(PROP_BOX_SHADOW_H_OFFSET);
+                dest.push(PROP_BOX_SHADOW_H_OFFSET);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "box-shadow-v-offset" => {
-                self.class_defs.push(PROP_BOX_SHADOW_V_OFFSET);
+                dest.push(PROP_BOX_SHADOW_V_OFFSET);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "box-shadow-blur" => {
-                self.class_defs.push(PROP_BOX_SHADOW_BLUR);
+                dest.push(PROP_BOX_SHADOW_BLUR);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "box-shadow-spread" => {
-                self.class_defs.push(PROP_BOX_SHADOW_SPREAD);
+                dest.push(PROP_BOX_SHADOW_SPREAD);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "box-shadow-color" => {
-                self.class_defs.push(PROP_BOX_SHADOW_COLOR);
+                dest.push(PROP_BOX_SHADOW_COLOR);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "font-size" => {
-                self.class_defs.push(PROP_FONT_SIZE);
+                dest.push(PROP_FONT_SIZE);
                 match val {
                     StyleValue::Px(v) => {
-                        self.class_defs.push(v.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
                     }
                     _ => {
-                        self.class_defs.push(24f32.to_bits());
-                        self.class_defs.push(UNIT_PX);
+                        dest.push(24f32.to_bits());
+                        dest.push(UNIT_PX);
                     }
                 }
             }
             "fill" => {
-                self.class_defs.push(PROP_FILL_COLOR);
+                dest.push(PROP_FILL_COLOR);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "stroke" => {
-                self.class_defs.push(PROP_STROKE_COLOR);
+                dest.push(PROP_STROKE_COLOR);
                 if let StyleValue::Color(r, g, b, a) = val {
-                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                    dest.push(Self::pack_color(*r, *g, *b, *a));
                 } else {
-                    self.class_defs.push(0);
+                    dest.push(0);
                 }
             }
             "stroke-width" => {
-                self.class_defs.push(PROP_STROKE_WIDTH);
+                dest.push(PROP_STROKE_WIDTH);
                 if let StyleValue::Px(v) = val {
-                    self.class_defs.push(v.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
                 } else {
-                    self.class_defs.push(0f32.to_bits());
-                    self.class_defs.push(UNIT_PX);
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
-            _ => {} // Unsupported properties silently ignored
+            _ => {}
         }
     }
 
-    /// Builds a node's entry in `node_class_list` and returns the offset.
-    /// Format: [count: u32, class_def_offset_0: u32, class_def_offset_1: u32, ...]
-    fn build_node_class_entry(&mut self, cpu_idx: usize) -> u32 {
-        let offset = self.node_class_list.len() as u32;
-        let classes = &self.cpu_nodes[cpu_idx].classes;
+    /// Builds a node's style entry and returns the offset.
+    /// Format: [class_count: u32, class_def_offset_0, ..., prop_id, val..., CTRL_END]
+    fn build_node_class_and_inline_styles_entry(&mut self, cpu_idx: usize) -> u32 {
+        let offset = self.node_class_list_and_inline_styles.len() as u32;
+        let node = &self.cpu_nodes[cpu_idx];
+        let classes = &node.classes;
 
-        // Collect matching class offsets
+        // 1. Classes
         let mut matching_offsets: Vec<u32> = Vec::new();
         for class_name in classes {
             let dot_selector = format!(".{}", class_name);
@@ -1570,10 +1572,19 @@ impl FlexEngine {
             }
         }
 
-        self.node_class_list.push(matching_offsets.len() as u32);
+        self.node_class_list_and_inline_styles.push(matching_offsets.len() as u32);
         for off in matching_offsets {
-            self.node_class_list.push(off);
+            self.node_class_list_and_inline_styles.push(off);
         }
+
+        // 2. Inline Styles
+        let inline_styles = node.inline_styles.clone(); // Clone to avoid borrow issues while writing to buffer
+        for (prop, val) in inline_styles {
+            Self::serialize_property(&mut self.node_class_list_and_inline_styles, &prop, &val);
+        }
+
+        // 3. End Token
+        self.node_class_list_and_inline_styles.push(CTRL_END);
 
         offset
     }
@@ -1730,7 +1741,7 @@ impl FlexEngine {
         }
 
         self.gpu_nodes.clear();
-        self.node_class_list.clear();
+        self.node_class_list_and_inline_styles.clear();
         self.characters.clear(); // Rebuild chars too since they depend on node index
         self.curves.truncate(self.permanent_curve_count);
         
@@ -1844,8 +1855,8 @@ impl FlexEngine {
                 }
             }
 
-            // Build class entry (borrows &mut self)
-            let class_data_offset = self.build_node_class_entry(cpu_idx);
+            // Build style entry (borrows &mut self)
+            let class_data_offset = self.build_node_class_and_inline_styles_entry(cpu_idx);
 
             {
                 let gpu_node = &mut self.gpu_nodes[gpu_idx as usize];
@@ -2091,10 +2102,9 @@ impl FlexEngine {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
         }
     }
-
-    pub fn get_node_class_list_buffer(&self) -> js_sys::Uint8Array {
-        let size = self.node_class_list.len() * std::mem::size_of::<u32>();
-        let ptr = self.node_class_list.as_ptr() as *const u8;
+    pub fn get_node_class_list_and_inline_styles_buffer(&self) -> js_sys::Uint8Array {
+        let size = self.node_class_list_and_inline_styles.len() * std::mem::size_of::<u32>();
+        let ptr = self.node_class_list_and_inline_styles.as_ptr() as *const u8;
         unsafe {
             js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
         }
@@ -2104,8 +2114,8 @@ impl FlexEngine {
         self.class_defs.len()
     }
 
-    pub fn get_node_class_list_count(&self) -> usize {
-        self.node_class_list.len()
+    pub fn get_node_class_list_and_inline_styles_count(&self) -> usize {
+        self.node_class_list_and_inline_styles.len()
     }
 
     pub fn get_curve_buffer(&self) -> js_sys::Uint8Array {

@@ -41,7 +41,7 @@ pub struct FlexRenderer {
     curve_buffer: Option<GpuBuffer>,
     glyph_info_buffer: Option<GpuBuffer>,
     class_defs_buffer: Option<GpuBuffer>,
-    node_class_list_buffer: Option<GpuBuffer>,
+    node_class_list_and_inline_styles_buffer: Option<GpuBuffer>,
 
     // Image Resources
     atlas_texture: Option<GpuTexture>,
@@ -100,7 +100,7 @@ impl FlexRenderer {
             curve_buffer: None,
             glyph_info_buffer: None,
             class_defs_buffer: None,
-            node_class_list_buffer: None,
+            node_class_list_and_inline_styles_buffer: None,
             pipeline_reset_signals: None,
             pipeline_bottom_up: None,
             pipeline_top_down: None,
@@ -254,8 +254,8 @@ impl FlexRenderer {
         }
         self.class_defs_buffer = Some(class_defs_buf);
 
-        // Node Class List Buffer
-        let ncl_data = engine.get_node_class_list_buffer();
+        // Node Class List and Inline Styles Buffer
+        let ncl_data = engine.get_node_class_list_and_inline_styles_buffer();
         let ncl_alloc = if ncl_data.byte_length() == 0 { 4 } else { ncl_data.byte_length() };
         let ncl_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
             ncl_alloc as f64,
@@ -265,13 +265,13 @@ impl FlexRenderer {
             let engine = self.engine.borrow();
             let ncl_slice = unsafe {
                 std::slice::from_raw_parts(
-                    engine.node_class_list.as_ptr() as *const u8,
-                    engine.node_class_list.len() * std::mem::size_of::<u32>()
+                    engine.node_class_list_and_inline_styles.as_ptr() as *const u8,
+                    engine.node_class_list_and_inline_styles.len() * std::mem::size_of::<u32>()
                 )
             };
             self.device.queue().write_buffer_with_u8_array(&ncl_buf, 0.0, ncl_slice);
         }
-        self.node_class_list_buffer = Some(ncl_buf);
+        self.node_class_list_and_inline_styles_buffer = Some(ncl_buf);
 
         // Prepend generated WGSL constants to compute shader
         let full_compute_source = format!("{}\n{}", SHADER_STYLE_CONSTANTS, SHADER_COMPUTE);
@@ -396,7 +396,7 @@ impl FlexRenderer {
                 entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
-                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_and_inline_styles_buffer.as_ref().unwrap())));
                 entries
             },
             self.bind_group_layout_compute.as_ref().unwrap(),
@@ -704,7 +704,7 @@ impl FlexRenderer {
         {
             let engine = self.engine.borrow();
             let class_defs_data = engine.get_class_defs_buffer();
-            let ncl_data = engine.get_node_class_list_buffer();
+            let ncl_data = engine.get_node_class_list_and_inline_styles_buffer();
 
             let cd_byte_len = class_defs_data.byte_length();
             let ncl_byte_len = ncl_data.byte_length();
@@ -733,24 +733,24 @@ impl FlexRenderer {
                 );
             }
 
-            // Resize/Sync node_class_list_buffer
+            // Resize/Sync node_class_list_and_inline_styles_buffer
             if ncl_byte_len > 0 {
-                let current_size = Reflect::get(self.node_class_list_buffer.as_ref().unwrap(), &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+                let current_size = Reflect::get(self.node_class_list_and_inline_styles_buffer.as_ref().unwrap(), &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
                 if ncl_byte_len > current_size {
-                    if let Some(old) = &self.node_class_list_buffer { old.destroy(); }
-                    self.node_class_list_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
+                    if let Some(old) = &self.node_class_list_and_inline_styles_buffer { old.destroy(); }
+                    self.node_class_list_and_inline_styles_buffer = Some(self.device.create_buffer(&GpuBufferDescriptor::new(
                         ncl_byte_len as f64, 0x0080 | 0x0008
                     )));
                     need_rebind = true;
                 }
                 let ncl_slice = unsafe {
                     std::slice::from_raw_parts(
-                        engine.node_class_list.as_ptr() as *const u8,
-                        engine.node_class_list.len() * std::mem::size_of::<u32>()
+                        engine.node_class_list_and_inline_styles.as_ptr() as *const u8,
+                        engine.node_class_list_and_inline_styles.len() * std::mem::size_of::<u32>()
                     )
                 };
                 self.device.queue().write_buffer_with_u8_array(
-                    self.node_class_list_buffer.as_ref().unwrap(), 0.0,
+                    self.node_class_list_and_inline_styles_buffer.as_ref().unwrap(), 0.0,
                     ncl_slice
                 );
             }
@@ -1111,7 +1111,7 @@ impl FlexRenderer {
                 entries.push(&GpuBindGroupEntry::new(2, &make_buffer_binding(self.characters_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
-                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_and_inline_styles_buffer.as_ref().unwrap())));
                 entries
             },
             self.bind_group_layout_compute.as_ref().unwrap(),

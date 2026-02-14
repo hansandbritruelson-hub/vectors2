@@ -128,7 +128,7 @@ struct GlyphData {
 @group(0) @binding(2) var<storage, read_write> characters: array<Character>;
 @group(0) @binding(3) var<storage, read> glyph_data: array<GlyphData>;
 @group(0) @binding(4) var<storage, read> class_defs: array<u32>;
-@group(0) @binding(5) var<storage, read> node_class_list: array<u32>;
+@group(0) @binding(5) var<storage, read> node_class_list_and_inline_styles: array<u32>;
 
 // --- Style Constants (generated) ---
 // These are injected by the renderer at shader compilation time.
@@ -519,10 +519,12 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let is_hovered = (nodes[id].flags & 16u) != 0u;
     let list_offset = nodes[id].class_data_offset;
-    let count = node_class_list[list_offset];
+    let count = node_class_list_and_inline_styles[list_offset];
+    var i = 1u;
 
+    // 1. Process Classes
     for (var c = 0u; c < count; c = c + 1u) {
-        var pos = node_class_list[list_offset + 1u + c]; // offset into class_defs
+        var pos = node_class_list_and_inline_styles[list_offset + 1u + c]; // offset into class_defs
         var in_hover = false;
         loop {
             let prop_id = class_defs[pos];
@@ -807,6 +809,124 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
                 default: { break; }
             }
+        }
+    }
+
+    // 2. Process Inline Styles (LIFO/Override)
+    var inline_pos = list_offset + 1u + count;
+    loop {
+        let prop_id = node_class_list_and_inline_styles[inline_pos];
+        if (prop_id == CTRL_END) { break; }
+        inline_pos = inline_pos + 1u;
+
+        switch (prop_id) {
+            case PROP_BACKGROUND_COLOR_RGBA: {
+                nodes[id].color_r = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                nodes[id].color_g = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 1u]);
+                nodes[id].color_b = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 2u]);
+                nodes[id].color_a = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 3u]);
+                inline_pos = inline_pos + 4u;
+            }
+            case PROP_WIDTH: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].fixed_width = val; }
+                else { nodes[id].fixed_width = -1.0; } 
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_HEIGHT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].fixed_height = val; }
+                else { nodes[id].fixed_height = -1.0; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_FLEX_DIRECTION: {
+                nodes[id].flex_direction = node_class_list_and_inline_styles[inline_pos];
+                inline_pos = inline_pos + 1u;
+            }
+            case PROP_POSITION_MODE: {
+                nodes[id].position_mode = node_class_list_and_inline_styles[inline_pos];
+                inline_pos = inline_pos + 1u;
+            }
+            case PROP_TOP: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].top_offset = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_LEFT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].left_offset = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_Z_INDEX: {
+                nodes[id].z_index = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                inline_pos = inline_pos + 1u;
+            }
+            case PROP_PADDING_TOP: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].padding_top = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_PADDING_RIGHT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].padding_right = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_PADDING_BOTTOM: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].padding_bottom = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_PADDING_LEFT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].padding_left = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_MARGIN_TOP: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].margin_top = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_MARGIN_RIGHT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].margin_right = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_MARGIN_BOTTOM: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].margin_bottom = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_MARGIN_LEFT: {
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].margin_left = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            case PROP_TEXT_COLOR_RGBA: {
+                nodes[id].text_color_r = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                nodes[id].text_color_g = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 1u]);
+                nodes[id].text_color_b = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 2u]);
+                nodes[id].text_color_a = bitcast<f32>(node_class_list_and_inline_styles[inline_pos + 3u]);
+                inline_pos = inline_pos + 4u;
+            }
+            case 37u: { // PROP_FONT_SIZE
+                let val = bitcast<f32>(node_class_list_and_inline_styles[inline_pos]);
+                let unit = node_class_list_and_inline_styles[inline_pos + 1u];
+                if (unit == 1u) { nodes[id].font_size = val; }
+                inline_pos = inline_pos + 2u;
+            }
+            default: { break; }
         }
     }
 }
