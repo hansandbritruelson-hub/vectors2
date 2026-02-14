@@ -164,6 +164,7 @@ impl Element {
 pub fn div() -> Element { Element::new() }
 pub fn text(content: &str) -> Element { Element::new().text(content) }
 pub fn input() -> Element { Element::new() }
+pub fn img() -> Element { Element::new() }
 
 // --- Block System ---
 

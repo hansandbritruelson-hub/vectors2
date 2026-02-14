@@ -726,7 +726,7 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-        for _ in 0..8 {
+        for _ in 0..32 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_top_down.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
@@ -758,7 +758,7 @@ impl FlexRenderer {
              dispatch(&pass, workgroups);
              end_compute(&pass);
         }
-        for _ in 0..8 {
+        for _ in 0..32 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_final_layout.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());

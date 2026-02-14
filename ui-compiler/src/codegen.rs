@@ -106,7 +106,7 @@ pub fn generate_rust(template: &Template) -> String {
         #![allow(unused_variables)]
 
         use renderer_core::FlexEngine;
-        use renderer_core::ui::{div, text, input, mount_list, mount_if, Element};
+        use renderer_core::ui::{div, text, input, img, mount_list, mount_if, Element};
         use renderer_core::signals::{ReadSignal, create_effect, create_signal, create_memo, ToReactiveString, ToBool};
         use std::rc::Rc;
         use std::cell::RefCell;
@@ -212,6 +212,7 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
         "div" => quote! { div() },
         "text" => quote! { text("") },
         "input" => quote! { input() },
+        "img" => quote! { img() },
         "bezier-curve" => quote! { div() },
         _ => quote! { div() },
     };
@@ -235,7 +236,7 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
                     }
                 }
             }
-            "image" => {
+            "image" | "src" => {
                 let val = &attr.value;
                 builder = quote! { #builder.image(#val) };
             }
@@ -421,6 +422,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         "div" => quote! { div() },
         "text" => quote! { text("") },
         "input" => quote! { input() },
+        "img" => quote! { img() },
         "bezier-curve" => quote! { div() },
         _ => quote! { div() },
     };
@@ -444,7 +446,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                     }
                 }
             }
-            "image" => {
+            "image" | "src" => {
                 let val = &attr.value;
                 builder = quote! { #builder.image(#val) };
             }

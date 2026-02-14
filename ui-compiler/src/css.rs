@@ -121,19 +121,73 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
     for (p, vals) in decls {
         match p.as_str() {
             "padding" => {
-                if let Some(v) = vals.get(0) {
-                    declarations.insert("padding-top".into(), v.clone());
-                    declarations.insert("padding-right".into(), v.clone());
-                    declarations.insert("padding-bottom".into(), v.clone());
-                    declarations.insert("padding-left".into(), v.clone());
+                match vals.len() {
+                    1 => {
+                        let v = &vals[0];
+                        declarations.insert("padding-top".into(), v.clone());
+                        declarations.insert("padding-right".into(), v.clone());
+                        declarations.insert("padding-bottom".into(), v.clone());
+                        declarations.insert("padding-left".into(), v.clone());
+                    }
+                    2 => {
+                        let v = &vals[0];
+                        let h = &vals[1];
+                        declarations.insert("padding-top".into(), v.clone());
+                        declarations.insert("padding-right".into(), h.clone());
+                        declarations.insert("padding-bottom".into(), v.clone());
+                        declarations.insert("padding-left".into(), h.clone());
+                    }
+                    3 => {
+                        let t = &vals[0];
+                        let h = &vals[1];
+                        let b = &vals[2];
+                        declarations.insert("padding-top".into(), t.clone());
+                        declarations.insert("padding-right".into(), h.clone());
+                        declarations.insert("padding-bottom".into(), b.clone());
+                        declarations.insert("padding-left".into(), h.clone());
+                    }
+                    4 => {
+                        declarations.insert("padding-top".into(), vals[0].clone());
+                        declarations.insert("padding-right".into(), vals[1].clone());
+                        declarations.insert("padding-bottom".into(), vals[2].clone());
+                        declarations.insert("padding-left".into(), vals[3].clone());
+                    }
+                    _ => {}
                 }
             }
             "margin" => {
-                if let Some(v) = vals.get(0) {
-                    declarations.insert("margin-top".into(), v.clone());
-                    declarations.insert("margin-right".into(), v.clone());
-                    declarations.insert("margin-bottom".into(), v.clone());
-                    declarations.insert("margin-left".into(), v.clone());
+                match vals.len() {
+                    1 => {
+                        let v = &vals[0];
+                        declarations.insert("margin-top".into(), v.clone());
+                        declarations.insert("margin-right".into(), v.clone());
+                        declarations.insert("margin-bottom".into(), v.clone());
+                        declarations.insert("margin-left".into(), v.clone());
+                    }
+                    2 => {
+                        let v = &vals[0];
+                        let h = &vals[1];
+                        declarations.insert("margin-top".into(), v.clone());
+                        declarations.insert("margin-right".into(), h.clone());
+                        declarations.insert("margin-bottom".into(), v.clone());
+                        declarations.insert("margin-left".into(), h.clone());
+                    }
+                    3 => {
+                        let t = &vals[0];
+                        let h = &vals[1];
+                        let b = &vals[2];
+                        declarations.insert("margin-top".into(), t.clone());
+                        declarations.insert("margin-right".into(), h.clone());
+                        declarations.insert("margin-bottom".into(), b.clone());
+                        declarations.insert("margin-left".into(), h.clone());
+                    }
+                    4 => {
+                        declarations.insert("margin-top".into(), vals[0].clone());
+                        declarations.insert("margin-right".into(), vals[1].clone());
+                        declarations.insert("margin-bottom".into(), vals[2].clone());
+                        declarations.insert("margin-left".into(), vals[3].clone());
+                    }
+                    _ => {}
                 }
             }
             "border" => {

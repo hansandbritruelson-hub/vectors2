@@ -532,11 +532,21 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     pos = pos + 4u;
                 }
                 case PROP_WIDTH: {
-                    if (apply) { nodes[id].fixed_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].fixed_width = val; }
+                        else { nodes[id].fixed_width = -1.0; } // Fallback to auto
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_HEIGHT: {
-                    if (apply) { nodes[id].fixed_height = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].fixed_height = val; }
+                        else { nodes[id].fixed_height = -1.0; } // Fallback to auto
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_FLEX_DIRECTION: {
@@ -548,11 +558,19 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     pos = pos + 1u;
                 }
                 case PROP_TOP: {
-                    if (apply) { nodes[id].top_offset = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].top_offset = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_LEFT: {
-                    if (apply) { nodes[id].left_offset = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].left_offset = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_Z_INDEX: {
@@ -560,51 +578,99 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     pos = pos + 1u;
                 }
                 case PROP_PADDING_TOP: {
-                    if (apply) { nodes[id].padding_top = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].padding_top = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_RIGHT: {
-                    if (apply) { nodes[id].padding_right = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].padding_right = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_BOTTOM: {
-                    if (apply) { nodes[id].padding_bottom = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].padding_bottom = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_PADDING_LEFT: {
-                    if (apply) { nodes[id].padding_left = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].padding_left = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_TOP: {
-                    if (apply) { nodes[id].margin_top = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].margin_top = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_RIGHT: {
-                    if (apply) { nodes[id].margin_right = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].margin_right = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_BOTTOM: {
-                    if (apply) { nodes[id].margin_bottom = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].margin_bottom = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_MARGIN_LEFT: {
-                    if (apply) { nodes[id].margin_left = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].margin_left = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_TOP_WIDTH: {
-                    if (apply) { nodes[id].border_top_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].border_top_width = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_RIGHT_WIDTH: {
-                    if (apply) { nodes[id].border_right_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].border_right_width = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_BOTTOM_WIDTH: {
-                    if (apply) { nodes[id].border_bottom_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].border_bottom_width = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_LEFT_WIDTH: {
-                    if (apply) { nodes[id].border_left_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].border_left_width = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BORDER_COLOR_TOP: {
@@ -624,11 +690,19 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     pos = pos + 1u;
                 }
                 case PROP_OUTLINE_WIDTH: {
-                    if (apply) { nodes[id].outline_width = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].outline_width = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_OUTLINE_OFFSET: {
-                    if (apply) { nodes[id].outline_offset = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].outline_offset = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_OUTLINE_COLOR_TOP: {
@@ -648,19 +722,35 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     pos = pos + 1u;
                 }
                 case PROP_BOX_SHADOW_H_OFFSET: {
-                    if (apply) { nodes[id].box_shadow_h_offset = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].box_shadow_h_offset = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_V_OFFSET: {
-                    if (apply) { nodes[id].box_shadow_v_offset = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].box_shadow_v_offset = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_BLUR: {
-                    if (apply) { nodes[id].box_shadow_blur = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].box_shadow_blur = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_SPREAD: {
-                    if (apply) { nodes[id].box_shadow_spread = bitcast<f32>(class_defs[pos]); }
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].box_shadow_spread = val; }
+                    }
                     pos = pos + 2u;
                 }
                 case PROP_BOX_SHADOW_COLOR: {
