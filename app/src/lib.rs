@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 // Include generated assets
-include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
+pub mod generated_assets {
+    include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
+}
 
 // Include generated UI
 pub mod generated_ui;
@@ -19,6 +21,14 @@ pub fn run() -> Result<(), JsValue> {
 #[wasm_bindgen]
 pub fn create_app_renderer(device: renderer_core::web_bindings::GpuDevice, context: renderer_core::web_bindings::GpuCanvasContext) -> FlexRenderer {
     let engine = Rc::new(RefCell::new(FlexEngine::new()));
+
+    // Load embedded assets
+    for key in generated_assets::ASSET_KEYS {
+        if let Some(data) = generated_assets::get_asset(key) {
+             let engine_key = format!("asset://{}", key);
+             engine.borrow_mut().load_asset_bytes(&engine_key, data.to_vec());
+        }
+    }
 
     // Build the UI in a root scope
     let root_scope = renderer_core::signals::create_root(|s| {
@@ -37,7 +47,7 @@ pub async fn load_image_to_engine(engine: Rc<RefCell<FlexEngine>>, url: String) 
         let path = url.trim_start_matches("asset:");
         let clean_path = path.trim_start_matches('/');
         
-        let bytes: Option<Vec<u8>> = get_asset(clean_path).map(|b| b.to_vec());
+        let bytes: Option<Vec<u8>> = generated_assets::get_asset(clean_path).map(|b| b.to_vec());
         
         if let Some(data) = bytes {
              // We need a way to pass this data to the engine.

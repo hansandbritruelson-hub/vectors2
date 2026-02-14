@@ -86,6 +86,12 @@ box_shadow_color = 35
 text_color_rgba = 36
 # font_size = 37               →  [value:f32] [unit:u32]
 font_size = 37
+# fill_color = 38              →  [packed_rgba:u32]
+fill_color = 38
+# stroke_color = 39            →  [packed_rgba:u32]
+stroke_color = 39
+# stroke_width = 40            →  [value:f32] [unit:u32]
+stroke_width = 40
 
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer

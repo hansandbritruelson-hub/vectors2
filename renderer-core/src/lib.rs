@@ -431,12 +431,19 @@ pub struct GpuNode {
     pub text_color_a: f32,
 
     pub font_size: f32,
+
+    // --- SVG Styles ---
+    pub fill_color: u32,
+    pub stroke_color: u32,
+    pub stroke_width: f32,
+    
+    pub _pad_styles: u32, // Padding to 276 bytes
 }
 
 #[test]
 fn test_gpu_node_size() {
-    // Adding f32 (4 bytes) to GpuNode. 256 + 4 = 260.
-    assert_eq!(std::mem::size_of::<GpuNode>(), 260);
+    // Adding 4 fields (16 bytes) to GpuNode. 260 + 16 = 276.
+    assert_eq!(std::mem::size_of::<GpuNode>(), 276);
 }
 
 impl GpuNode {
@@ -504,6 +511,10 @@ impl GpuNode {
             box_shadow_spread: 0.0,
             box_shadow_color: 0,
             font_size: 24.0,
+            fill_color: 0,
+            stroke_color: 0,
+            stroke_width: 0.0,
+            _pad_styles: 0,
         }
     }
 }
@@ -1504,6 +1515,32 @@ impl FlexEngine {
                     }
                 }
             }
+            "fill" => {
+                self.class_defs.push(PROP_FILL_COLOR);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "stroke" => {
+                self.class_defs.push(PROP_STROKE_COLOR);
+                if let StyleValue::Color(r, g, b, a) = val {
+                    self.class_defs.push(Self::pack_color(*r, *g, *b, *a));
+                } else {
+                    self.class_defs.push(0);
+                }
+            }
+            "stroke-width" => {
+                self.class_defs.push(PROP_STROKE_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    self.class_defs.push(v.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                } else {
+                    self.class_defs.push(0f32.to_bits());
+                    self.class_defs.push(UNIT_PX);
+                }
+            }
             _ => {} // Unsupported properties silently ignored
         }
     }
@@ -1540,6 +1577,11 @@ impl FlexEngine {
         self.build_class_buffers();
         self.texture_atlas.process_deletions();
 
+        // Build style map from previous frame's hit_test_nodes
+        let style_map: HashMap<u32, (u32, u32, f32)> = self.hit_test_nodes.iter()
+            .map(|n| (n.cpu_index, (n.fill_color, n.stroke_color, n.stroke_width)))
+            .collect();
+
         for i in 0..self.cpu_nodes.len() {
              
              // We work around borrow checker by extracting needed data first if possible,
@@ -1563,28 +1605,64 @@ impl FlexEngine {
 
              if let Some(id) = image_id {
                  // Check if current cache is valid
-                 let mut needs_update = true;
-                 if let Some(handle) = &self.cpu_nodes[i].cached_texture {
-                      // We assume if handle exists, it matches the ID (since we clear on ID change)
-                      // We just check dims.
-                      if handle.region.width == w && handle.region.height == h {
-                          needs_update = false;
-                      }
-                 }
-
-                 if needs_update {
-                      // Try to get existing handle from Atlas Cache
-                      let key = texture_atlas::CacheKey { id: id.clone(), width: w, height: h };
-                      
-                      let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
+                 let (fill, stroke, stroke_w) = style_map.get(&(i as u32)).cloned().unwrap_or((0, 0, 0.0));
+                 
+                 // Always try to get existing handle from Atlas Cache to ensure style match
+                 let key = texture_atlas::CacheKey { 
+                     id: id.clone(), 
+                     width: w, 
+                     height: h,
+                     fill_color: fill,
+                     stroke_color: stroke,
+                     stroke_width: stroke_w.to_bits()
+                 };
+                 
+                 let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
                            Some(h)
                       } else {
                            // Not in atlas. Need to load/resize/allocate.
                            if let Some(bytes) = self.assets.get(&id).cloned() {
                                 let is_svg = id.ends_with(".svg") || (bytes.len() > 4 && bytes.as_slice().starts_with(b"<svg"));
                                 let pixels: Option<Vec<u8>> = if is_svg {
+                                     let mut final_bytes = bytes.clone();
+                                     // Inject styles if present
+                                     if fill != 0 || stroke != 0 || stroke_w > 0.0 {
+                                         let mut style = String::new();
+                                         // Unpack fill
+                                         if fill != 0 {
+                                             let r = fill & 0xFF;
+                                             let g = (fill >> 8) & 0xFF;
+                                             let b = (fill >> 16) & 0xFF;
+                                             let a = ((fill >> 24) & 0xFF) as f32 / 255.0;
+                                             style.push_str(&format!("fill: rgba({},{},{},{}); ", r,g,b,a));
+                                         }
+                                         // Unpack stroke
+                                         if stroke != 0 {
+                                             let r = stroke & 0xFF;
+                                             let g = (stroke >> 8) & 0xFF;
+                                             let b = (stroke >> 16) & 0xFF;
+                                             let a = ((stroke >> 24) & 0xFF) as f32 / 255.0;
+                                             style.push_str(&format!("stroke: rgba({},{},{},{}); ", r,g,b,a));
+                                         }
+                                         // Stroke Width
+                                         if stroke_w > 0.0 {
+                                             style.push_str(&format!("stroke-width: {}; ", stroke_w));
+                                         }
+                                         
+                                         if let Ok(s) = std::str::from_utf8(&final_bytes) {
+                                              // Find <svg tag to inject style
+                                              // Simple search for first <svg
+                                              if let Some(idx) = s.to_lowercase().find("<svg") {
+                                                  let mut new_s = s.to_string();
+                                                  // Insert after <svg
+                                                  new_s.insert_str(idx + 4, &format!(" style=\"{}\" ", style));
+                                                  final_bytes = new_s.into_bytes();
+                                              }
+                                         }
+                                     }
+
                                      let opt = usvg::Options::default();
-                                     if let Ok(tree) = usvg::Tree::from_data(&bytes, &opt) {
+                                     if let Ok(tree) = usvg::Tree::from_data(&final_bytes, &opt) {
                                           let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap_or(tiny_skia::Pixmap::new(1, 1).unwrap());
                                           let current_w = tree.size.width();
                                           let current_h = tree.size.height();
@@ -1613,7 +1691,6 @@ impl FlexEngine {
                       };
                       
                       self.cpu_nodes[i].cached_texture = new_handle;
-                 }
              }
         }
 
@@ -2295,7 +2372,14 @@ impl FlexEngine {
     }
 
     pub fn add_image_to_atlas(&mut self, id: String, width: u32, height: u32, data: Vec<u8>) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {
-        let key = texture_atlas::CacheKey { id, width, height };
+        let key = texture_atlas::CacheKey { 
+            id, 
+            width, 
+            height,
+            fill_color: 0,
+            stroke_color: 0,
+            stroke_width: 0,
+        };
         let handle = self.texture_atlas.allocate(key, data);
         if handle.is_some() {
             self.mark_dirty();

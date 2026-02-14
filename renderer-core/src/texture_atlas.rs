@@ -10,6 +10,9 @@ pub struct CacheKey {
     pub id: String,
     pub width: u32,
     pub height: u32,
+    pub fill_color: u32,
+    pub stroke_color: u32,
+    pub stroke_width: u32, // f32 bits
 }
 
 #[derive(Clone, Debug)]

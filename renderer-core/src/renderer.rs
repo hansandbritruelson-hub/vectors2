@@ -946,7 +946,9 @@ impl FlexRenderer {
                              }
                              gpu_nodes.push(unsafe { node.assume_init() });
                          }
-                         engine.borrow_mut().hit_test_nodes = gpu_nodes;
+                         let mut e = engine.borrow_mut();
+                         e.hit_test_nodes = gpu_nodes;
+                         e.mark_dirty(); // Ensure we re-flatten to apply styles to SVGs
                     } else {
                         staging_buf.destroy();
                     }

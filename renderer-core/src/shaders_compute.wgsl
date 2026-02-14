@@ -85,6 +85,11 @@ struct Node {
     text_color_a: f32,
 
     font_size: f32,
+
+    fill_color: u32,
+    stroke_color: u32,
+    stroke_width: f32,
+    _pad_styles: u32,
 };
 
 struct Character {
@@ -507,6 +512,10 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].text_color_b = 1.0;
     nodes[id].text_color_a = 1.0;
     nodes[id].font_size = 24.0;
+    nodes[id].fill_color = 0u;
+    nodes[id].stroke_color = 0u;
+    nodes[id].stroke_width = 0.0;
+    nodes[id]._pad_styles = 0u;
 
     let is_hovered = (nodes[id].flags & 16u) != 0u;
     let list_offset = nodes[id].class_data_offset;
@@ -777,6 +786,22 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         let val = bitcast<f32>(class_defs[pos]);
                         let unit = class_defs[pos + 1u];
                         if (unit == 1u) { nodes[id].font_size = val; }
+                    }
+                    pos = pos + 2u;
+                }
+                case 38u: { // PROP_FILL_COLOR
+                    if (apply) { nodes[id].fill_color = class_defs[pos]; }
+                    pos = pos + 1u;
+                }
+                case 39u: { // PROP_STROKE_COLOR
+                    if (apply) { nodes[id].stroke_color = class_defs[pos]; }
+                    pos = pos + 1u;
+                }
+                case 40u: { // PROP_STROKE_WIDTH
+                    if (apply) {
+                        let val = bitcast<f32>(class_defs[pos]);
+                        let unit = class_defs[pos + 1u];
+                        if (unit == 1u) { nodes[id].stroke_width = val; }
                     }
                     pos = pos + 2u;
                 }

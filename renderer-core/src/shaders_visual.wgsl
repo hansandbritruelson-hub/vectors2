@@ -85,6 +85,11 @@ struct Node {
     text_color_a: f32,
 
     font_size: f32,
+
+    fill_color: u32,
+    stroke_color: u32,
+    stroke_width: f32,
+    _pad_styles: u32,
 };
 
 struct Character {

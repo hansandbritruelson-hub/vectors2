@@ -109,7 +109,14 @@ mod tests {
         
         // 1024x1024 atlas
         let mut atlas = TextureAtlas::new(1024, 1024);
-        let key = CacheKey { id: "test".to_string(), width: 100, height: 100 };
+        let key = CacheKey { 
+            id: "test".to_string(), 
+            width: 100, 
+            height: 100,
+            fill_color: 0,
+            stroke_color: 0,
+            stroke_width: 0,
+        };
         // Create dummy pixels
         let pixels = vec![0u8; (100 * 100 * 4) as usize];
         
