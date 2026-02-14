@@ -691,6 +691,7 @@ pub struct FlexEngine {
     pub focused_node: Option<u32>,
     pub last_hover_target: Option<usize>,
     pub dirty: bool,
+    pub device_pixel_ratio: f32,
 }
 
 #[wasm_bindgen]
@@ -700,6 +701,12 @@ impl FlexEngine {
         #[cfg(target_arch = "wasm32")]
         console_error_panic_hook::set_once();
         log("FlexEngine Initialized via WebAssembly (CpuNode Topology)");
+        
+        let dpr = if let Some(win) = web_bindings::get_window() {
+             win.device_pixel_ratio() as f32
+        } else {
+             1.0
+        };
         
         let mut engine = FlexEngine {
             cpu_nodes: Vec::new(),
@@ -727,6 +734,7 @@ impl FlexEngine {
             last_hover_target: None,
             hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
+            device_pixel_ratio: dpr,
         };
         
         engine.parse_font();
@@ -1578,8 +1586,16 @@ impl FlexEngine {
         self.texture_atlas.process_deletions();
 
         // Build style map from previous frame's hit_test_nodes
-        let style_map: HashMap<u32, (u32, u32, f32)> = self.hit_test_nodes.iter()
-            .map(|n| (n.cpu_index, (n.fill_color, n.stroke_color, n.stroke_width)))
+        let style_map: HashMap<u32, (u32, u32, f32, u32, u32, u32, u32)> = self.hit_test_nodes.iter()
+            .map(|n| (n.cpu_index, (
+                n.fill_color, 
+                n.stroke_color, 
+                n.stroke_width,
+                n.text_color_r.to_bits(),
+                n.text_color_g.to_bits(),
+                n.text_color_b.to_bits(),
+                n.text_color_a.to_bits()
+            )))
             .collect();
 
         for i in 0..self.cpu_nodes.len() {
@@ -1589,14 +1605,14 @@ impl FlexEngine {
              // We need to mutate `cached_texture`.
              
              // Clone ID to avoid borrow issues while mutating
-             let (image_id, w, h) = {
+             let (image_id, w_logical, h_logical) = {
                  let node = &self.cpu_nodes[i];
                  if let Some(ref id) = node.image_asset_id {
-                     let w = if node.fixed_width > 0.0 { node.fixed_width as u32 } else { 64 };
-                     let h = if node.fixed_height > 0.0 { node.fixed_height as u32 } else { 64 };
+                     let w = if node.fixed_width > 0.0 { node.fixed_width } else { 64.0 };
+                     let h = if node.fixed_height > 0.0 { node.fixed_height } else { 64.0 };
                      (Some(id.clone()), w, h)
                  } else {
-                     (None, 0, 0)
+                     (None, 0.0, 0.0)
                  }
              };
 
@@ -1605,7 +1621,18 @@ impl FlexEngine {
 
              if let Some(id) = image_id {
                  // Check if current cache is valid
-                 let (fill, stroke, stroke_w) = style_map.get(&(i as u32)).cloned().unwrap_or((0, 0, 0.0));
+                 let (fill, stroke, stroke_w, tr, tg, tb, ta) = style_map.get(&(i as u32)).cloned().unwrap_or((0, 0, 0.0, 1.0f32.to_bits(), 1.0f32.to_bits(), 1.0f32.to_bits(), 1.0f32.to_bits()));
+                 
+                 // Apply Device Pixel Ratio
+                 let w = (w_logical * self.device_pixel_ratio).ceil() as u32;
+                 let h = (h_logical * self.device_pixel_ratio).ceil() as u32;
+
+                 let text_color_packed = Self::pack_color(
+                     f32::from_bits(tr), 
+                     f32::from_bits(tg), 
+                     f32::from_bits(tb), 
+                     f32::from_bits(ta)
+                 );
                  
                  // Always try to get existing handle from Atlas Cache to ensure style match
                  let key = texture_atlas::CacheKey { 
@@ -1614,7 +1641,8 @@ impl FlexEngine {
                      height: h,
                      fill_color: fill,
                      stroke_color: stroke,
-                     stroke_width: stroke_w.to_bits()
+                     stroke_width: stroke_w.to_bits(),
+                     text_color: text_color_packed,
                  };
                  
                  let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
@@ -1626,7 +1654,7 @@ impl FlexEngine {
                                 let pixels: Option<Vec<u8>> = if is_svg {
                                      let mut final_bytes = bytes.clone();
                                      // Inject styles if present
-                                     if fill != 0 || stroke != 0 || stroke_w > 0.0 {
+                                     if fill != 0 || stroke != 0 || stroke_w > 0.0 || text_color_packed != 0xFFFFFFFF {
                                          let mut style = String::new();
                                          // Unpack fill
                                          if fill != 0 {
@@ -1646,8 +1674,15 @@ impl FlexEngine {
                                          }
                                          // Stroke Width
                                          if stroke_w > 0.0 {
-                                             style.push_str(&format!("stroke-width: {}; ", stroke_w));
+                                             style.push_str(&format!("stroke-width: {}px; ", stroke_w));
                                          }
+
+                                         // Inject Color property (for currentColor support)
+                                         let cr = f32::from_bits(tr);
+                                         let cg = f32::from_bits(tg);
+                                         let cb = f32::from_bits(tb);
+                                         let ca = f32::from_bits(ta);
+                                         style.push_str(&format!("color: rgba({},{},{},{}); ", (cr*255.0) as u8, (cg*255.0) as u8, (cb*255.0) as u8, ca));
                                          
                                          if let Ok(s) = std::str::from_utf8(&final_bytes) {
                                               // Find <svg tag to inject style
@@ -2379,6 +2414,7 @@ impl FlexEngine {
             fill_color: 0,
             stroke_color: 0,
             stroke_width: 0,
+            text_color: 0,
         };
         let handle = self.texture_atlas.allocate(key, data);
         if handle.is_some() {

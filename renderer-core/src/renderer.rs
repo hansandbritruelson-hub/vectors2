@@ -428,6 +428,14 @@ impl FlexRenderer {
     }
 
     pub fn render(&mut self) {
+        let window_value = get_window().unwrap();
+        let dpr = window_value.device_pixel_ratio();
+        
+        {
+            let mut engine = self.engine.borrow_mut();
+            engine.device_pixel_ratio = dpr as f32;
+        }
+
         if !self.engine.borrow().is_dirty() {
             // log("Render: skipping, no dirty");
             return;
@@ -441,8 +449,6 @@ impl FlexRenderer {
             return; 
         }
 
-        let window_value = get_window().unwrap();
-        let dpr = window_value.device_pixel_ratio();
         let canvas: HtmlCanvasElement = self.context.canvas();
         let width = canvas.width() as f32 / dpr as f32;
         let height = canvas.height() as f32 / dpr as f32;

@@ -13,8 +13,7 @@
 .icon {
     width: 100px;
     height: 100px;
-    fill: #9a2c2cff;
     stroke: #FFFFFF;
-    stroke-width: 10;
+    stroke-width: 20px;
 }
 </style>

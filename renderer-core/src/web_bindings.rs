@@ -4,7 +4,7 @@
 use wasm_bindgen::prelude::*;
 use js_sys::{Object, Reflect, Promise};
 
-#[wasm_bindgen(inline_js = "export function get_window() { return window; }")]
+#[wasm_bindgen(inline_js = "export function get_window() { return typeof window !== 'undefined' ? window : undefined; }")]
 extern "C" {
     pub fn get_window() -> Option<Window>;
 }
@@ -25,10 +25,6 @@ extern "C" {
 extern "C" {
     // Window & Canvas
     pub type Window;
-    #[wasm_bindgen(js_name = window)]
-    pub fn window() -> Option<Window>;
-
-
 
     #[wasm_bindgen(method, getter, js_name = devicePixelRatio)]
     pub fn device_pixel_ratio(this: &Window) -> f64;

@@ -13,6 +13,7 @@ pub struct CacheKey {
     pub fill_color: u32,
     pub stroke_color: u32,
     pub stroke_width: u32, // f32 bits
+    pub text_color: u32,
 }
 
 #[derive(Clone, Debug)]

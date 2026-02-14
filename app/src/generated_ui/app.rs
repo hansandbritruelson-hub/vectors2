@@ -44,10 +44,9 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
     let mut e = engine.borrow_mut();
     {
         let mut decls = std::collections::HashMap::new();
-        decls.insert("width".to_string(), renderer_core::StyleValue::Px(100f32));
         decls.insert(
-            "fill".to_string(),
-            renderer_core::StyleValue::Color(0.6039216f32, 0.17254902f32, 0.17254902f32, 1f32),
+            "stroke-width".to_string(),
+            renderer_core::StyleValue::Px(20f32),
         );
         decls.insert("height".to_string(), renderer_core::StyleValue::Px(100f32));
         decls.insert(
@@ -55,9 +54,10 @@ fn register_styles(engine: Rc<RefCell<FlexEngine>>) {
             renderer_core::StyleValue::Color(1f32, 1f32, 1f32, 1f32),
         );
         decls.insert(
-            "stroke-width".to_string(),
-            renderer_core::StyleValue::Px(10f32),
+            "fill".to_string(),
+            renderer_core::StyleValue::Color(0.6039216f32, 0.17254902f32, 0.17254902f32, 1f32),
         );
+        decls.insert("width".to_string(), renderer_core::StyleValue::Px(100f32));
         e.add_style_rule(".icon".to_string(), decls);
     }
 }
