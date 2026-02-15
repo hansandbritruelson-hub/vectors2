@@ -1932,11 +1932,9 @@ impl FlexEngine {
                                      let opt = usvg::Options::default();
                                      if let Ok(tree) = usvg::Tree::from_data(&final_bytes, &opt) {
                                           let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap_or(tiny_skia::Pixmap::new(1, 1).unwrap());
-                                          let current_w = tree.size.width();
-                                          let current_h = tree.size.height();
-                                          let sx = w as f32 / current_w as f32;
-                                          let sy = h as f32 / current_h as f32;
-                                          let ts = tiny_skia::Transform::from_scale(sx, sy);
+                                          // FitTo::Size already handles scaling to the target raster size.
+                                          // Applying an additional scale transform shrinks icons into the top-left.
+                                          let ts = tiny_skia::Transform::identity();
                                           resvg::render(&tree, usvg::FitTo::Size(w, h), ts, pixmap.as_mut());
                                           Some(pixmap.data().to_vec())
                                      } else {  log(&format!("Failed to parse SVG for atlas: {}", id)); None }

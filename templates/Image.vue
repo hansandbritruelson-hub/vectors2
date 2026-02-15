@@ -108,20 +108,22 @@
 
 /* Sidebar */
 .sidebar {
-  width: 60px;
+  width: 64px;
   flex-direction: column;
   background-color: #1e1e1e;
   border-right: 1px solid #333;
-  padding: 10px 0;
+  padding: 12px 0;
   align-items: center;
 }
 
 .tool-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   justify-content: center;
   align-items: center;
-  /**border-radius: 8px;**/  margin-bottom: 8px;
+  border-width: 1px;
+  border-color: transparent;
+  margin-bottom: 6px;
 }
 
 .tool-icon:hover {
@@ -130,12 +132,12 @@
 
 .tool-icon.active {
   background-color: #444;
-  border: 1px solid #555;
+  border-color: #555;
 }
 
 .icon-img {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
 /* Main Content */
