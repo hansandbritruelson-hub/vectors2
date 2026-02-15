@@ -1065,11 +1065,28 @@ impl FlexRenderer {
                              gpu_nodes.push(unsafe { node.assume_init() });
                          }
                          let mut e = engine.borrow_mut();
-                         let was_empty = e.hit_test_nodes.is_empty();
+
+                         // Request a follow-up frame when the readback snapshot changed.
+                         // This keeps click-driven rendering while allowing SVG atlas keys
+                         // (which depend on computed style/readback) to settle after view swaps.
+                         let needs_follow_up = {
+                             let prev = &e.hit_test_nodes;
+                             prev.is_empty()
+                                 || prev.len() != gpu_nodes.len()
+                                 || prev.iter().zip(gpu_nodes.iter()).any(|(a, b)| {
+                                     a.cpu_index != b.cpu_index
+                                         || a.fill_color != b.fill_color
+                                         || a.stroke_color != b.stroke_color
+                                         || a.stroke_width.to_bits() != b.stroke_width.to_bits()
+                                         || a.text_color_r.to_bits() != b.text_color_r.to_bits()
+                                         || a.text_color_g.to_bits() != b.text_color_g.to_bits()
+                                         || a.text_color_b.to_bits() != b.text_color_b.to_bits()
+                                         || a.text_color_a.to_bits() != b.text_color_a.to_bits()
+                                 })
+                         };
+
                          e.hit_test_nodes = gpu_nodes;
-                         // Trigger a single follow-up flatten once readback data exists so
-                         // SVG style-driven atlas keys can resolve from real computed styles.
-                         if was_empty {
+                         if needs_follow_up {
                              e.mark_dirty();
                          }
                     } else {
