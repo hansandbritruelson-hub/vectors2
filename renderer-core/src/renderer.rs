@@ -69,6 +69,7 @@ pub struct FlexRenderer {
     bind_group_layout_render: Option<GpuBindGroupLayout>,
 
     readback_in_progress: Rc<std::cell::Cell<bool>>,
+    panic_readback_in_progress: Rc<std::cell::Cell<bool>>,
 }
 
 #[wasm_bindgen]
@@ -126,6 +127,7 @@ impl FlexRenderer {
             atlas_height: 0,
             sampler: None,
             readback_in_progress: Rc::new(std::cell::Cell::new(false)),
+            panic_readback_in_progress: Rc::new(std::cell::Cell::new(false)),
         }
     }
 }
@@ -953,13 +955,16 @@ impl FlexRenderer {
         }
 
         // --- Post-Layout Cleanup & Panic Check ---
-        command_encoder.copy_buffer_to_buffer(
-            self.panic_buffer.as_ref().unwrap(),
-            0.0,
-            self.panic_readback_buffer.as_ref().unwrap(),
-            0.0,
-            4.0
-        );
+        let panic_check_this_frame = !self.panic_readback_in_progress.get();
+        if panic_check_this_frame {
+            command_encoder.copy_buffer_to_buffer(
+                self.panic_buffer.as_ref().unwrap(),
+                0.0,
+                self.panic_readback_buffer.as_ref().unwrap(),
+                0.0,
+                4.0
+            );
+        }
 
         let canvas = self.context.canvas();
         let texture_view = self.context.get_current_texture().create_view();
@@ -1018,8 +1023,10 @@ impl FlexRenderer {
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
         self.engine.borrow_mut().mark_clean();
         
-        // Trigger Panic Check (Async)
-        self.check_gpu_panic();
+        // Trigger Panic Check (Async), but only when no panic readback is in-flight.
+        if panic_check_this_frame {
+            self.check_gpu_panic();
+        }
 
         // PASS 5: Read-back Nodes for hit testing (deferred to end of frame)
         if !self.readback_in_progress.get() {
@@ -1058,8 +1065,13 @@ impl FlexRenderer {
                              gpu_nodes.push(unsafe { node.assume_init() });
                          }
                          let mut e = engine.borrow_mut();
+                         let was_empty = e.hit_test_nodes.is_empty();
                          e.hit_test_nodes = gpu_nodes;
-                         e.mark_dirty(); // Ensure we re-flatten to apply styles to SVGs
+                         // Trigger a single follow-up flatten once readback data exists so
+                         // SVG style-driven atlas keys can resolve from real computed styles.
+                         if was_empty {
+                             e.mark_dirty();
+                         }
                     } else {
                         staging_buf.destroy();
                     }
@@ -1246,16 +1258,23 @@ impl FlexRenderer {
 
     fn check_gpu_panic(&self) {
         let panic_read_buf = self.panic_readback_buffer.as_ref().unwrap().clone();
+        let panic_flag = self.panic_readback_in_progress.clone();
+        panic_flag.set(true);
         
         let _ = wasm_bindgen_futures::future_to_promise(async move {
             let promise = panic_read_buf.map_async(0x0001); // GpuMapMode::READ
-            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            let mapped = wasm_bindgen_futures::JsFuture::from(promise).await;
+            if mapped.is_err() {
+                panic_flag.set(false);
+                return Ok(JsValue::UNDEFINED);
+            }
             
             let array_buffer = panic_read_buf.get_mapped_range();
             let uint32_array = js_sys::Uint32Array::new(&array_buffer);
             let error_id = uint32_array.get_index(0);
             
             panic_read_buf.unmap();
+            panic_flag.set(false);
             
             if error_id != 0 {
                 crate::web_bindings::warn(&format!("--- GPU PANIC ---"));

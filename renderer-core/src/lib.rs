@@ -701,6 +701,8 @@ pub struct FlexEngine {
 
     pub focused_node: Option<u32>,
     pub last_hover_target: Option<usize>,
+    #[wasm_bindgen(skip)]
+    pub last_hover_chain: Vec<usize>,
     pub dirty: bool,
     pub device_pixel_ratio: f32,
 }
@@ -745,6 +747,7 @@ impl FlexEngine {
             panic_data: vec![0], // Initialize with 0 (no error)
             focused_node: None,
             last_hover_target: None,
+            last_hover_chain: Vec::new(),
             hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
             device_pixel_ratio: dpr,
@@ -2420,24 +2423,47 @@ impl FlexEngine {
             return;
         }
 
-        self.last_hover_target = target_cpu_idx;
         let mut changed_hover = false;
 
-        // Collect hover chain (target + all ancestors)
-        let mut hover_chain = std::collections::HashSet::new();
+        // Build target chain root->leaf for efficient diff against previous hover chain.
+        let mut new_chain = Vec::new();
         let mut curr = target_cpu_idx;
         while let Some(idx) = curr {
-            hover_chain.insert(idx);
+            if idx >= self.cpu_nodes.len() {
+                break;
+            }
+            new_chain.push(idx);
             curr = self.cpu_nodes[idx].parent;
         }
+        new_chain.reverse();
 
-        for (idx, node) in self.cpu_nodes.iter_mut().enumerate() {
-            let is_hovered = hover_chain.contains(&idx);
-            if node.hovered != is_hovered {
-                node.hovered = is_hovered;
+        // Find common prefix to avoid touching unaffected nodes.
+        let mut common = 0usize;
+        while common < self.last_hover_chain.len()
+            && common < new_chain.len()
+            && self.last_hover_chain[common] == new_chain[common]
+        {
+            common += 1;
+        }
+
+        // Un-hover nodes no longer in the chain.
+        for &idx in self.last_hover_chain[common..].iter().rev() {
+            if idx < self.cpu_nodes.len() && self.cpu_nodes[idx].hovered {
+                self.cpu_nodes[idx].hovered = false;
                 changed_hover = true;
             }
         }
+
+        // Hover newly entered nodes.
+        for &idx in &new_chain[common..] {
+            if idx < self.cpu_nodes.len() && !self.cpu_nodes[idx].hovered {
+                self.cpu_nodes[idx].hovered = true;
+                changed_hover = true;
+            }
+        }
+
+        self.last_hover_target = target_cpu_idx;
+        self.last_hover_chain = new_chain;
 
         if changed_hover {
             self.mark_dirty();
