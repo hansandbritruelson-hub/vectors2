@@ -345,10 +345,6 @@ pub struct GpuNode {
     pub fixed_height: f32,  // -1.0 = auto
     pub min_height: f32,
     pub max_height: f32,    // -1.0 = none
-    pub base_min_width: f32,
-    pub base_max_width: f32,
-    pub base_min_height: f32,
-    pub base_max_height: f32,
     
     // --- Computed Values ---
     pub final_width: f32,
@@ -457,7 +453,7 @@ pub struct GpuNode {
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 336);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 320);
 }
 
 impl GpuNode {
@@ -469,10 +465,6 @@ impl GpuNode {
             fixed_height: -1.0,
             min_height: 0.0,
             max_height: -1.0,
-            base_min_width: 0.0,
-            base_max_width: -1.0,
-            base_min_height: 0.0,
-            base_max_height: -1.0,
             final_width: 0.0,
             desired_height: 0.0,
             final_height: 0.0,
@@ -747,6 +739,8 @@ impl FlexEngine {
         console_error_panic_hook::set_once();
         log("FlexEngine Initialized via WebAssembly (CpuNode Topology)");
         
+        let dpr = 1.0;
+        #[cfg(target_arch = "wasm32")]
         let dpr = if let Some(win) = web_bindings::get_window() {
              win.device_pixel_ratio() as f32
         } else {
@@ -1872,7 +1866,16 @@ impl FlexEngine {
         }
 
         // 2. Inline Styles
-        let inline_styles = node.inline_styles.clone(); // Clone to avoid borrow issues while writing to buffer
+        let mut inline_styles = node.inline_styles.clone(); // Clone to avoid borrow issues while writing to buffer
+        
+        // Merge imperative fields into inline styles if they are non-default
+        if node.fixed_width >= 0.0 { inline_styles.insert("width".into(), StyleValue::Px(node.fixed_width)); }
+        if node.fixed_height >= 0.0 { inline_styles.insert("height".into(), StyleValue::Px(node.fixed_height)); }
+        if node.min_width != 0.0 { inline_styles.insert("min-width".into(), StyleValue::Px(node.min_width)); }
+        if node.max_width != -1.0 { inline_styles.insert("max-width".into(), StyleValue::Px(node.max_width)); }
+        if node.min_height != 0.0 { inline_styles.insert("min-height".into(), StyleValue::Px(node.min_height)); }
+        if node.max_height != -1.0 { inline_styles.insert("max-height".into(), StyleValue::Px(node.max_height)); }
+
         for (prop, val) in inline_styles {
             Self::serialize_property(&mut self.node_class_list_and_inline_styles, &prop, &val);
         }
@@ -2170,10 +2173,6 @@ impl FlexEngine {
                 gpu_node.max_width = cn_max_width;
                 gpu_node.min_height = cn_min_height;
                 gpu_node.max_height = cn_max_height;
-                gpu_node.base_min_width = cn_min_width;
-                gpu_node.base_max_width = cn_max_width;
-                gpu_node.base_min_height = cn_min_height;
-                gpu_node.base_max_height = cn_max_height;
                 gpu_node.flags = cn_flags;
                 if self.cpu_nodes[cpu_idx].hovered {
                     gpu_node.flags |= 16; // Bit 4 = Hovered

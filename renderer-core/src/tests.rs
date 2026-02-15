@@ -171,4 +171,38 @@ mod tests {
             .build(engine.clone(), None);
         engine.borrow_mut().render();
     }
+
+    #[test]
+    fn test_css_properties_serialization() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use crate::ui::div;
+
+        let engine = Rc::new(RefCell::new(FlexEngine::new()));
+        
+        let node_id = {
+            let mut e = engine.borrow_mut();
+            let id = e.add_node(100.0);
+            // Set imperative field directly to test merging
+            e.cpu_nodes[id as usize].max_width = 10.0;
+            id
+        };
+            
+        engine.borrow_mut().render();
+
+        unsafe {
+            let engine_borrow = engine.borrow();
+            let nodes = engine_borrow.get_nodes_ptr();
+            let gpu_node = &*nodes.add(node_id as usize);
+            
+            // Should be copied in flatten()
+            assert_eq!(gpu_node.max_width, 10.0);
+            
+            // Verify that the style buffer grew (meaning styles were serialized)
+            assert!(engine_borrow.get_node_class_list_and_inline_styles_count() > 0);
+            
+            // We can also verify that style resolution pass reset it in our simulated shader logic,
+            // but for now, this confirms the CPU-side data flow is correct.
+        }
+    }
 }

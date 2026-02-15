@@ -5,10 +5,6 @@ struct Node {
     fixed_height: f32, // -1.0 = auto
     min_height: f32,
     max_height: f32, // -1.0 = none
-    base_min_width: f32,
-    base_max_width: f32,
-    base_min_height: f32,
-    base_max_height: f32,
     final_width: f32,
     
     desired_height: f32,
@@ -732,7 +728,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].max_width = max(0.0, val); }
+                    if (unit == UNIT_PX) { nodes[id].max_width = val; }
                 }
                 pos = pos + 2u;
                 break;
@@ -750,7 +746,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].max_height = max(0.0, val); }
+                    if (unit == UNIT_PX) { nodes[id].max_height = val; }
                 }
                 pos = pos + 2u;
                 break;
@@ -1105,13 +1101,13 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Default values for style properties
+    // 4. Default Layout Values (reset for each resolve pass)
     nodes[id].fixed_width = -1.0;
-    nodes[id].min_width = nodes[id].base_min_width;
-    nodes[id].max_width = nodes[id].base_max_width;
+    nodes[id].min_width = 0.0;
+    nodes[id].max_width = -1.0;
     nodes[id].fixed_height = -1.0;
-    nodes[id].min_height = nodes[id].base_min_height;
-    nodes[id].max_height = nodes[id].base_max_height;
+    nodes[id].min_height = 0.0;
+    nodes[id].max_height = -1.0;
     nodes[id].color_r = 0.0;
     nodes[id].color_g = 0.0;
     nodes[id].color_b = 0.0;

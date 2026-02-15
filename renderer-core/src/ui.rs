@@ -76,6 +76,10 @@ impl Element {
     // Deprecated helpers - will be removed or made to use .style()
     pub fn width(self, w: f32) -> Self { self.style("width", crate::StyleValue::Px(w)) }
     pub fn height(self, h: f32) -> Self { self.style("height", crate::StyleValue::Px(h)) }
+    pub fn min_width(self, w: f32) -> Self { self.style("min-width", crate::StyleValue::Px(w)) }
+    pub fn max_width(self, w: f32) -> Self { self.style("max-width", crate::StyleValue::Px(w)) }
+    pub fn min_height(self, h: f32) -> Self { self.style("min-height", crate::StyleValue::Px(h)) }
+    pub fn max_height(self, h: f32) -> Self { self.style("max-height", crate::StyleValue::Px(h)) }
     pub fn color(self, r: f32, g: f32, b: f32, a: f32) -> Self { self.style("color", crate::StyleValue::Color(r, g, b, a)) }
     pub fn row(self) -> Self { self.style("flex-direction", crate::StyleValue::Ident("row".into())) }
     pub fn col(self) -> Self { self.style("flex-direction", crate::StyleValue::Ident("column".into())) }
