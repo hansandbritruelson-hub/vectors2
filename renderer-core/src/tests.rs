@@ -160,5 +160,14 @@ mod tests {
         engine.add_style_rule(".test".to_string(), decls);
         assert_eq!(engine.stylesheet.rules.len(), 1, "Should replace existing rule, not append");
     }
-}
 
+    #[test]
+    #[should_panic(expected = "Unknown CSS property")]
+    fn test_unknown_inline_style_property_panics() {
+        let engine = std::rc::Rc::new(std::cell::RefCell::new(FlexEngine::new()));
+        div()
+            .style("unknown-prop-for-test", StyleValue::Px(1.0))
+            .build(engine.clone(), None);
+        engine.borrow_mut().render();
+    }
+}

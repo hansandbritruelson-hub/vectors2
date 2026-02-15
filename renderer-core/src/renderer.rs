@@ -42,6 +42,9 @@ pub struct FlexRenderer {
     glyph_info_buffer: Option<GpuBuffer>,
     class_defs_buffer: Option<GpuBuffer>,
     node_class_list_and_inline_styles_buffer: Option<GpuBuffer>,
+    leaf_nodes_buffer: Option<GpuBuffer>,
+    panic_buffer: Option<GpuBuffer>,
+    panic_readback_buffer: Option<GpuBuffer>,
 
     // Image Resources
     atlas_texture: Option<GpuTexture>,
@@ -101,6 +104,9 @@ impl FlexRenderer {
             glyph_info_buffer: None,
             class_defs_buffer: None,
             node_class_list_and_inline_styles_buffer: None,
+            leaf_nodes_buffer: None,
+            panic_buffer: None,
+            panic_readback_buffer: None,
             pipeline_reset_signals: None,
             pipeline_bottom_up: None,
             pipeline_top_down: None,
@@ -138,6 +144,7 @@ impl FlexRenderer {
         const USAGE_COPY_DST: u32 = 0x0008;
         const USAGE_COPY_SRC: u32 = 0x0004;
         const USAGE_UNIFORM: u32 = 0x0040;
+        const USAGE_MAP_READ: u32 = 0x0001;
 
         let node_count = engine.get_node_count() as u32;
         let node_size = engine.get_node_size() as u32;
@@ -273,6 +280,37 @@ impl FlexRenderer {
         }
         self.node_class_list_and_inline_styles_buffer = Some(ncl_buf);
 
+        // Panic Buffer (1 * u32)
+        let panic_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+            4.0,
+            USAGE_STORAGE | USAGE_COPY_SRC | USAGE_COPY_DST
+        ));
+        self.panic_buffer = Some(panic_buf);
+
+        let panic_read_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+            4.0,
+            USAGE_MAP_READ | USAGE_COPY_DST
+        ));
+        self.panic_readback_buffer = Some(panic_read_buf);
+
+        // Leaf Nodes Buffer
+        let leaf_count = engine.leaf_nodes.len() as u32;
+        let leaf_alloc = if leaf_count == 0 { 4 } else { leaf_count * 4 };
+        let leaf_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+            leaf_alloc as f64,
+            USAGE_STORAGE | USAGE_COPY_DST
+        ));
+        if leaf_count > 0 {
+            let leaf_slice = unsafe {
+                std::slice::from_raw_parts(
+                    engine.leaf_nodes.as_ptr() as *const u8,
+                    engine.leaf_nodes.len() * 4
+                )
+            };
+            self.device.queue().write_buffer_with_u8_array(&leaf_buf, 0.0, leaf_slice);
+        }
+        self.leaf_nodes_buffer = Some(leaf_buf);
+
         // Prepend generated WGSL constants to compute shader
         let full_compute_source = format!("{}\n{}", SHADER_STYLE_CONSTANTS, SHADER_COMPUTE);
         let module_compute = self.device.create_shader_module(&GpuShaderModuleDescriptor::new(&full_compute_source));
@@ -293,6 +331,8 @@ impl FlexRenderer {
         entries_compute.push(&make_layout_entry(3, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
         entries_compute.push(&make_layout_entry(4, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
         entries_compute.push(&make_layout_entry(5, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage));
+        entries_compute.push(&make_layout_entry(6, GpuShaderStage::COMPUTE, GpuBufferBindingType::Storage));        // Panic
+        entries_compute.push(&make_layout_entry(7, GpuShaderStage::COMPUTE, GpuBufferBindingType::ReadOnlyStorage)); // Leaf Nodes
         self.bind_group_layout_compute = Some(self.device.create_bind_group_layout(&GpuBindGroupLayoutDescriptor::new(&entries_compute)));
 
         let layout_entries = js_sys::Array::new();
@@ -397,6 +437,8 @@ impl FlexRenderer {
                 entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_and_inline_styles_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(6, &make_buffer_binding(self.panic_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(7, &make_buffer_binding(self.leaf_nodes_buffer.as_ref().unwrap())));
                 entries
             },
             self.bind_group_layout_compute.as_ref().unwrap(),
@@ -457,14 +499,15 @@ impl FlexRenderer {
             let engine = self.engine.borrow();
             let ascender = engine.get_ascender();
             let line_gap = engine.get_line_gap();
+            let node_count = engine.get_node_count() as f32;
             let _descender = engine.get_descender();
             let line_height = ascender - _descender + line_gap;
-            let node_count = engine.get_node_count() as f32;
+            let leaf_count = engine.leaf_nodes.len() as f32;
             
             // Pad to 32 bytes (8 floats)
             let uniform_data = vec![
                 width, height, ascender, line_height, 
-                node_count, 0.0, 0.0, 0.0
+                node_count, leaf_count, 0.0, 0.0
             ];
             unsafe {
                 std::slice::from_raw_parts(uniform_data.as_ptr() as *const u8, uniform_data.len() * 4).to_vec()
@@ -547,6 +590,54 @@ impl FlexRenderer {
                  self.rebind_all();
             }
         }
+
+        // Update Leaf Nodes
+        let leaf_count: u32;
+        {
+            let engine = self.engine.borrow();
+            leaf_count = engine.leaf_nodes.len() as u32;
+            let leaf_byte_length = leaf_count * 4;
+            
+            if leaf_count > 0 {
+                 let leaf_slice = unsafe {
+                     std::slice::from_raw_parts(
+                         engine.leaf_nodes.as_ptr() as *const u8,
+                         engine.leaf_nodes.len() * 4
+                     )
+                 };
+                 
+                 let current_leaf_buffer = self.leaf_nodes_buffer.as_ref().unwrap();
+                 let current_size = Reflect::get(current_leaf_buffer, &"size".into()).unwrap().as_f64().unwrap_or(0.0) as u32;
+
+                 if leaf_byte_length > current_size {
+                     if let Some(old) = &self.leaf_nodes_buffer {
+                         old.destroy();
+                     }
+                     let new_buf = self.device.create_buffer(&GpuBufferDescriptor::new(
+                          leaf_byte_length as f64,
+                          0x0080 | 0x0008 | 0x0004
+                     ));
+                     self.leaf_nodes_buffer = Some(new_buf);
+                     drop(engine);
+                     self.rebind_all();
+                 }
+                 
+                 let engine = self.engine.borrow();
+                 self.device.queue().write_buffer_with_u8_array(
+                     self.leaf_nodes_buffer.as_ref().unwrap(),
+                     0.0,
+                     leaf_slice
+                 );
+            }
+        }
+
+        // Zero out panic buffer
+        let zero = [0u8; 4];
+        self.device.queue().write_buffer_with_u8_array(
+            self.panic_buffer.as_ref().unwrap(),
+            0.0,
+            &zero
+        );
 
         // Update Curves
         {
@@ -763,6 +854,7 @@ impl FlexRenderer {
 
         let command_encoder = self.device.create_command_encoder(); 
         let workgroups = (node_count as f32 / 64.0).ceil() as u32;
+        let leaf_workgroups = (leaf_count as f32 / 64.0).ceil() as u32;
         let dispatch = |pass: &GpuComputePassEncoder, x: u32| {
              pass.dispatchWorkgroups(x, 1, 1);
         };
@@ -804,11 +896,11 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-        {
+        for _ in 0..64 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_bottom_up.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
-            dispatch(&pass, workgroups);
+            dispatch(&pass, leaf_workgroups);
             end_compute(&pass);
         }
 
@@ -820,7 +912,7 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-        for _ in 0..32 {
+        for _ in 0..64 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_top_down.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
@@ -836,23 +928,23 @@ impl FlexRenderer {
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-        {
+        for _ in 0..64 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_height_bottom_up.as_ref().unwrap());
+            pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
+            dispatch(&pass, leaf_workgroups);
+            end_compute(&pass);
+        }
+
+        // PASS 4: Final Layout
+        {
+            let pass = command_encoder.begin_compute_pass();
+            pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
             dispatch(&pass, workgroups);
             end_compute(&pass);
         }
-        
-        // PASS 4: Final Layout (Top-Down)
-        {
-             let pass = command_encoder.begin_compute_pass();
-             pass.set_pipeline_compute(self.pipeline_reset_signals.as_ref().unwrap());
-             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
-             dispatch(&pass, workgroups);
-             end_compute(&pass);
-        }
-        for _ in 0..32 {
+        for _ in 0..64 {
             let pass = command_encoder.begin_compute_pass();
             pass.set_pipeline_compute(self.pipeline_final_layout.as_ref().unwrap());
             pass.set_bind_group_compute(0, self.bind_group_compute.as_ref().unwrap());
@@ -860,6 +952,16 @@ impl FlexRenderer {
             end_compute(&pass);
         }
 
+        // --- Post-Layout Cleanup & Panic Check ---
+        command_encoder.copy_buffer_to_buffer(
+            self.panic_buffer.as_ref().unwrap(),
+            0.0,
+            self.panic_readback_buffer.as_ref().unwrap(),
+            0.0,
+            4.0
+        );
+
+        let canvas = self.context.canvas();
         let texture_view = self.context.get_current_texture().create_view();
         let canvas_width = canvas.width();
         let canvas_height = canvas.height();
@@ -915,6 +1017,9 @@ impl FlexRenderer {
         render_pass.end_render();
         self.device.queue().submit(&js_sys::Array::of1(&command_encoder.finish()));
         self.engine.borrow_mut().mark_clean();
+        
+        // Trigger Panic Check (Async)
+        self.check_gpu_panic();
 
         // PASS 5: Read-back Nodes for hit testing (deferred to end of frame)
         if !self.readback_in_progress.get() {
@@ -1112,6 +1217,8 @@ impl FlexRenderer {
                 entries.push(&GpuBindGroupEntry::new(3, &make_buffer_binding(self.glyph_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(4, &make_buffer_binding(self.class_defs_buffer.as_ref().unwrap())));
                 entries.push(&GpuBindGroupEntry::new(5, &make_buffer_binding(self.node_class_list_and_inline_styles_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(6, &make_buffer_binding(self.panic_buffer.as_ref().unwrap())));
+                entries.push(&GpuBindGroupEntry::new(7, &make_buffer_binding(self.leaf_nodes_buffer.as_ref().unwrap())));
                 entries
             },
             self.bind_group_layout_compute.as_ref().unwrap(),
@@ -1135,5 +1242,29 @@ impl FlexRenderer {
             &entries,
             self.bind_group_layout_render.as_ref().unwrap(),
         )));
+    }
+
+    fn check_gpu_panic(&self) {
+        let panic_read_buf = self.panic_readback_buffer.as_ref().unwrap().clone();
+        
+        let _ = wasm_bindgen_futures::future_to_promise(async move {
+            let promise = panic_read_buf.map_async(0x0001); // GpuMapMode::READ
+            let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+            
+            let array_buffer = panic_read_buf.get_mapped_range();
+            let uint32_array = js_sys::Uint32Array::new(&array_buffer);
+            let error_id = uint32_array.get_index(0);
+            
+            panic_read_buf.unmap();
+            
+            if error_id != 0 {
+                crate::web_bindings::warn(&format!("--- GPU PANIC ---"));
+                crate::web_bindings::warn(&format!("Unknown CSS Property ID encountered: {}", error_id));
+                crate::web_bindings::warn(&format!("Check style_defs.toml and ensure the ID is handled in apply_style_stream (shaders_compute.wgsl)"));
+                panic!("GPU Panic: Unknown CSS Property ID: {}", error_id);
+            }
+            
+            Ok(JsValue::UNDEFINED)
+        });
     }
 }

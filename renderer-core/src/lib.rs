@@ -687,6 +687,10 @@ pub struct FlexEngine {
     pub node_class_list_and_inline_styles: Vec<u32>,    // per-node [count, offset0, offset1, ..., CTRL_END]
     #[wasm_bindgen(skip)]
     pub class_offsets: HashMap<String, u32>,  // selector -> offset in class_defs
+    #[wasm_bindgen(skip)]
+    pub leaf_nodes: Vec<u32>,                 // indices of nodes with no children
+    #[wasm_bindgen(skip)]
+    pub panic_data: Vec<u32>,                 // [0] = error_code (prop_id)
 
     pub focused_node: Option<u32>,
     pub last_hover_target: Option<usize>,
@@ -730,6 +734,8 @@ impl FlexEngine {
             class_defs: Vec::new(),
             node_class_list_and_inline_styles: Vec::new(),
             class_offsets: HashMap::new(),
+            leaf_nodes: Vec::new(),
+            panic_data: vec![0], // Initialize with 0 (no error)
             focused_node: None,
             last_hover_target: None,
             hit_test_nodes: Vec::new(),
@@ -1550,7 +1556,13 @@ impl FlexEngine {
                     dest.push(UNIT_PX);
                 }
             }
-            _ => {}
+            _ => {
+                panic!(
+                    "Unknown CSS property '{}' with value {:?}. Add support in renderer-core/src/lib.rs::serialize_property and renderer-core/src/shaders_compute.wgsl::apply_style_stream.",
+                    prop,
+                    val
+                );
+            }
         }
     }
 
@@ -1799,8 +1811,9 @@ impl FlexEngine {
         let mut cpu_to_gpu: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
         
         if self.cpu_nodes.is_empty() { return; }
-        
-        // We assume Node 0 is Root?
+
+        self.leaf_nodes.clear();
+        self.panic_data[0] = 0;
         // Let's find all roots (nodes with no parent).
         // For simple single-root UI:
         let root_idx = 0; // Assumption
@@ -1847,7 +1860,10 @@ impl FlexEngine {
                 curr_child = self.cpu_nodes[child_cpu_idx].next_sibling;
             }
             
-            // Now update the Parent Node with child info
+            if cn_first_child.is_none() {
+                self.leaf_nodes.push(gpu_idx);
+            }
+
             let mut parent_gpu_idx = 0;
             if let Some(p_cpu) = cn_parent {
                 if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
