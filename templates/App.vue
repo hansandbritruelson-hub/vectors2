@@ -20,12 +20,24 @@
         >
           Video Editor
         </div>
+        <div
+          class="nav-tab"
+          :class="view == 'css-demo' ? 'active' : ''"
+          @click="set_view.set('css-demo')"
+        >
+          CSS Demo
+        </div>
+      </div>
+      <div class="system-status">
+        <div class="status-dot"></div>
+        <div class="status-text">GPU Ready</div>
       </div>
     </div>
     
     <div class="view-content">
       <Image v-if="view == 'image'" />
       <Video v-if="view == 'video'" />
+      <CssDemo v-if="view == 'css-demo'" />
     </div>
   </div>
 </template>
@@ -33,6 +45,7 @@
 <script>
     mod Image;
     mod Video;
+    mod CssDemo;
     
     let (view, set_view) = crate::signals::create_signal("image".to_string());
 </script>
@@ -50,8 +63,8 @@
   height: 56px;
   flex-direction: row;
   background-color: #1e1e1e;
-    align-items: center;
-  /* GPU shader unsupported for now: padding: 0 20px; */
+  align-items: center;
+  padding: 0 20px;
 }
 
 .app-logo {
@@ -64,7 +77,8 @@
   width: 24px;
   height: 24px;
   background-color: #3498db;
-  /**border-radius: 4px;**/  margin-right: 12px;
+  margin-right: 12px;
+  box-shadow: 0 0 8px rgba(52, 152, 219, 0.5);
 }
 
 .logo-text {
@@ -81,7 +95,7 @@
 
 .nav-tab {
   height: 100%;
-  /* GPU shader unsupported for now: padding: 0 24px; */
+  padding: 0 24px;
   justify-content: center;
   font-size: 13px;
   //font-weight: 500;
@@ -102,7 +116,6 @@
   position: absolute;
   //bottom: 0;
   left: 0;
-  /* GPU shader unsupported for now: right: 0; */
   height: 2px;
   background-color: #3498db;
 }
@@ -111,16 +124,21 @@
   flex-direction: row;
   align-items: center;
   background-color: #252525;
-  /* GPU shader unsupported for now: padding: 6px 12px; */
-  /**border-radius: 20px;**/  /* GPU shader unsupported for now: border: 1px solid #333; */
+  padding: 6px 12px;
+  margin-left: 20px;
+  border-width: 1px;
+  border-color: #3a3a3a #333 #282828 #454545;
+  outline-color: green;
+  outline-width: 1px;
+  outline-offset: 1px;
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   background-color: #2ecc71;
-  /**border-radius: 4px;**/  margin-right: 8px;
-  /* GPU shader unsupported for now: box-shadow: 0 0 10px rgba(46, 204, 113, 0.5); */
+  margin-right: 8px;
+  box-shadow: 0 0 10px rgba(46, 204, 113, 0.5);
 }
 
 .status-text {
@@ -130,13 +148,14 @@
 }
 
 .view-content {
-    flex-direction: column;
+  flex-direction: column;
+  padding: 10px 12px 12px 12px;
 }
 
 .font-size-test {
   font-size: 100px;
   color: #f1c40f;
-  /* GPU shader unsupported for now: margin: 20px; */
+  margin: 20px;
 }
 
 .spacer {

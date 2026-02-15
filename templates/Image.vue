@@ -111,8 +111,8 @@
   width: 60px;
   flex-direction: column;
   background-color: #1e1e1e;
-  /* GPU shader unsupported for now: border-right: 1px solid #333; */
-  /* GPU shader unsupported for now: padding: 10px 0; */
+  border-right: 1px solid #333;
+  padding: 10px 0;
   align-items: center;
 }
 
@@ -130,7 +130,7 @@
 
 .tool-icon.active {
   background-color: #444;
-  /* GPU shader unsupported for now: border: 1px solid #555; */
+  border: 1px solid #555;
 }
 
 .icon-img {
@@ -148,12 +148,12 @@
   height: 44px;
   flex-direction: row;
   background-color: #1e1e1e;
-    align-items: center;
-  /* GPU shader unsupported for now: padding: 0 16px; */
+  align-items: center;
+  padding: 0 16px;
 }
 
 .menu-item {
-  /* GPU shader unsupported for now: padding: 0 12px; */
+  padding: 0 12px;
   height: 100%;
   justify-content: center;
   font-size: 13px;
@@ -176,8 +176,8 @@
   height: 48px;
   flex-direction: row;
   background-color: #252525;
-    align-items: center;
-  /* GPU shader unsupported for now: padding: 0 12px; */
+  align-items: center;
+  padding: 0 12px;
 }
 
 .context-tools {
@@ -190,7 +190,7 @@
   height: 32px;
   justify-content: center;
   align-items: center;
-  /**border-radius: 4px;**/  /* GPU shader unsupported for now: margin: 0 2px; */
+  margin: 0 2px;
 }
 
 .tool-icon-small:hover {
@@ -210,19 +210,21 @@
   width: 1px;
   height: 20px;
   background-color: #444;
-  /* GPU shader unsupported for now: margin: 0 8px; */
+  margin: 0 8px;
 }
 
 .snap-tools {
   flex-direction: row;
   align-items: center;
-  /* GPU shader unsupported for now: padding: 4px 8px; */
-  /**border-radius: 4px;**/  background-color: #333;
+  padding: 4px 8px;
+  background-color: #333;
+  border-width: 1px;
+  border-color: #444;
 }
 
 .label-small {
   font-size: 11px;
-  /* GPU shader unsupported for now: margin-left: 6px; */
+  margin-left: 6px;
   color: #ccc;
 }
 
@@ -232,17 +234,17 @@
 }
 
 .canvas-area {
-    background-color: #121212;
+  background-color: #121212;
   justify-content: center;
   align-items: center;
-  /* GPU shader unsupported for now: padding: 40px; */
+  padding: 40px;
 }
 
 .canvas-mock {
   width: 600px;
   height: 400px;
   background-color: #fff;
-  /* GPU shader unsupported for now: box-shadow: 0 10px 30px rgba(0,0,0,0.5); */
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
   position: relative;
   /**overflow: hidden;**/}
 
@@ -253,7 +255,7 @@
   width: 150px;
   height: 100px;
   background-color: #3498db;
-  /* GPU shader unsupported for now: border: 2px solid #2980b9; */
+  border: 2px solid #2980b9;
 }
 
 .circle-shape {
@@ -263,14 +265,14 @@
   width: 120px;
   height: 120px;
   background-color: #e74c3c;
-  /**border-radius: 60px;**/  /* GPU shader unsupported for now: border: 2px solid #c0392b; */
+  border: 2px solid #c0392b;
 }
 
 /* Right Panel */
 .right-panel {
   width: 240px;
   background-color: #1e1e1e;
-  /* GPU shader unsupported for now: border-left: 1px solid #333; */
+  border-left: 1px solid #333;
   flex-direction: column;
 }
 
@@ -278,7 +280,7 @@
   height: 40px;
   flex-direction: row;
   align-items: center;
-  /* GPU shader unsupported for now: padding: 0 12px; */
+  padding: 0 12px;
   background-color: #252525;
   }
 
@@ -286,22 +288,22 @@
   font-size: 11px;
   //font-weight: 600;
   /* GPU shader unsupported for now: text-transform: uppercase; */
-  color: #888;
+  color: orange;
   //letter-spacing: 0.05em;
   margin-left: 8px;
 }
 
 .layer-list {
   flex-direction: column;
-  /* GPU shader unsupported for now: padding: 8px; */
+  padding: 8px;
 }
 
 .layer-item {
   height: 32px;
   flex-direction: row;
   align-items: center;
-  /* GPU shader unsupported for now: padding: 0 8px; */
-  /**border-radius: 4px;**/  margin-bottom: 2px;
+  padding: 0 8px;
+  margin-bottom: 2px;
 }
 
 .layer-item:hover {
@@ -310,12 +312,12 @@
 
 .layer-item.active {
   background-color: #333;
-  /* GPU shader unsupported for now: border: 1px solid #444; */
+  border: 1px solid #444;
 }
 
 .layer-name {
   font-size: 12px;
-  /* GPU shader unsupported for now: margin-left: 8px; */
+  margin-left: 8px;
   color: #ccc;
 }
 

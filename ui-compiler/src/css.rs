@@ -81,6 +81,33 @@ fn color_rgb(input: &str) -> IResult<&str, StyleValue> {
     Ok((input, StyleValue::Color(r, g, b, a)))
 }
 
+fn color_named(input: &str) -> IResult<&str, StyleValue> {
+    let (input, name) = alphanumeric1(input)?;
+    let name = name.to_ascii_lowercase();
+    let color = match name.as_str() {
+        "black" => Some((0.0, 0.0, 0.0, 1.0)),
+        "white" => Some((1.0, 1.0, 1.0, 1.0)),
+        "red" => Some((1.0, 0.0, 0.0, 1.0)),
+        "green" => Some((0.0, 0.5019608, 0.0, 1.0)),
+        "blue" => Some((0.0, 0.0, 1.0, 1.0)),
+        "yellow" => Some((1.0, 1.0, 0.0, 1.0)),
+        "cyan" | "aqua" => Some((0.0, 1.0, 1.0, 1.0)),
+        "magenta" | "fuchsia" => Some((1.0, 0.0, 1.0, 1.0)),
+        "gray" | "grey" => Some((0.5019608, 0.5019608, 0.5019608, 1.0)),
+        "orange" => Some((1.0, 0.64705884, 0.0, 1.0)),
+        "purple" => Some((0.5019608, 0.0, 0.5019608, 1.0)),
+        "pink" => Some((1.0, 0.7529412, 0.79607844, 1.0)),
+        "brown" => Some((0.64705884, 0.16470589, 0.16470589, 1.0)),
+        "transparent" => Some((0.0, 0.0, 0.0, 0.0)),
+        _ => None,
+    };
+
+    match color {
+        Some((r, g, b, a)) => Ok((input, StyleValue::Color(r, g, b, a))),
+        None => Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag))),
+    }
+}
+
 fn single_line_comment(input: &str) -> IResult<&str, ()> {
     let (input, _) = tag("//")(input)?;
     if let Some(idx) = input.find('\n') {
@@ -107,6 +134,7 @@ fn style_value(input: &str) -> IResult<&str, StyleValue> {
     alt((
         color_hex,
         color_rgb,
+        color_named,
         map(pair(parse_f32, tag("px")), |(v, _)| StyleValue::Px(v)),
         map(pair(parse_f32, tag("%")), |(v, _)| StyleValue::Percent(v)),
         map(pair(parse_f32, tag("em")), |(v, _)| StyleValue::Em(v)),
@@ -232,6 +260,144 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
                 declarations.insert("border-color-bottom".into(), color.clone());
                 declarations.insert("border-color-left".into(), color);
             }
+            "border-width" => {
+                match vals.len() {
+                    1 => {
+                        let v = &vals[0];
+                        declarations.insert("border-top-width".into(), v.clone());
+                        declarations.insert("border-right-width".into(), v.clone());
+                        declarations.insert("border-bottom-width".into(), v.clone());
+                        declarations.insert("border-left-width".into(), v.clone());
+                    }
+                    2 => {
+                        let v = &vals[0];
+                        let h = &vals[1];
+                        declarations.insert("border-top-width".into(), v.clone());
+                        declarations.insert("border-right-width".into(), h.clone());
+                        declarations.insert("border-bottom-width".into(), v.clone());
+                        declarations.insert("border-left-width".into(), h.clone());
+                    }
+                    3 => {
+                        let t = &vals[0];
+                        let h = &vals[1];
+                        let b = &vals[2];
+                        declarations.insert("border-top-width".into(), t.clone());
+                        declarations.insert("border-right-width".into(), h.clone());
+                        declarations.insert("border-bottom-width".into(), b.clone());
+                        declarations.insert("border-left-width".into(), h.clone());
+                    }
+                    4 => {
+                        declarations.insert("border-top-width".into(), vals[0].clone());
+                        declarations.insert("border-right-width".into(), vals[1].clone());
+                        declarations.insert("border-bottom-width".into(), vals[2].clone());
+                        declarations.insert("border-left-width".into(), vals[3].clone());
+                    }
+                    _ => {}
+                }
+            }
+            "border-color" => {
+                match vals.len() {
+                    1 => {
+                        let v = &vals[0];
+                        declarations.insert("border-color-top".into(), v.clone());
+                        declarations.insert("border-color-right".into(), v.clone());
+                        declarations.insert("border-color-bottom".into(), v.clone());
+                        declarations.insert("border-color-left".into(), v.clone());
+                    }
+                    2 => {
+                        let v = &vals[0];
+                        let h = &vals[1];
+                        declarations.insert("border-color-top".into(), v.clone());
+                        declarations.insert("border-color-right".into(), h.clone());
+                        declarations.insert("border-color-bottom".into(), v.clone());
+                        declarations.insert("border-color-left".into(), h.clone());
+                    }
+                    3 => {
+                        let t = &vals[0];
+                        let h = &vals[1];
+                        let b = &vals[2];
+                        declarations.insert("border-color-top".into(), t.clone());
+                        declarations.insert("border-color-right".into(), h.clone());
+                        declarations.insert("border-color-bottom".into(), b.clone());
+                        declarations.insert("border-color-left".into(), h.clone());
+                    }
+                    4 => {
+                        declarations.insert("border-color-top".into(), vals[0].clone());
+                        declarations.insert("border-color-right".into(), vals[1].clone());
+                        declarations.insert("border-color-bottom".into(), vals[2].clone());
+                        declarations.insert("border-color-left".into(), vals[3].clone());
+                    }
+                    _ => {}
+                }
+            }
+            "border-top" => {
+                let mut width = None;
+                let mut color = None;
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = Some(v),
+                        StyleValue::Color(..) => color = Some(v),
+                        _ => {}
+                    }
+                }
+                if let Some(w) = width {
+                    declarations.insert("border-top-width".into(), w);
+                }
+                if let Some(c) = color {
+                    declarations.insert("border-color-top".into(), c);
+                }
+            }
+            "border-right" => {
+                let mut width = None;
+                let mut color = None;
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = Some(v),
+                        StyleValue::Color(..) => color = Some(v),
+                        _ => {}
+                    }
+                }
+                if let Some(w) = width {
+                    declarations.insert("border-right-width".into(), w);
+                }
+                if let Some(c) = color {
+                    declarations.insert("border-color-right".into(), c);
+                }
+            }
+            "border-bottom" => {
+                let mut width = None;
+                let mut color = None;
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = Some(v),
+                        StyleValue::Color(..) => color = Some(v),
+                        _ => {}
+                    }
+                }
+                if let Some(w) = width {
+                    declarations.insert("border-bottom-width".into(), w);
+                }
+                if let Some(c) = color {
+                    declarations.insert("border-color-bottom".into(), c);
+                }
+            }
+            "border-left" => {
+                let mut width = None;
+                let mut color = None;
+                for v in vals {
+                    match v {
+                        StyleValue::Px(_) => width = Some(v),
+                        StyleValue::Color(..) => color = Some(v),
+                        _ => {}
+                    }
+                }
+                if let Some(w) = width {
+                    declarations.insert("border-left-width".into(), w);
+                }
+                if let Some(c) = color {
+                    declarations.insert("border-color-left".into(), c);
+                }
+            }
             "outline" => {
                 let mut width = StyleValue::Px(0.0);
                 let mut color = StyleValue::Color(0.0, 0.0, 0.0, 1.0);
@@ -247,6 +413,19 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
                 declarations.insert("outline-color-right".into(), color.clone());
                 declarations.insert("outline-color-bottom".into(), color.clone());
                 declarations.insert("outline-color-left".into(), color);
+            }
+            "outline-width" => {
+                if let Some(v) = vals.get(0) {
+                    declarations.insert("outline-width".into(), v.clone());
+                }
+            }
+            "outline-color" => {
+                if let Some(v) = vals.get(0) {
+                    declarations.insert("outline-color-top".into(), v.clone());
+                    declarations.insert("outline-color-right".into(), v.clone());
+                    declarations.insert("outline-color-bottom".into(), v.clone());
+                    declarations.insert("outline-color-left".into(), v.clone());
+                }
             }
             "box-shadow" => {
                 let mut h_offset = StyleValue::Px(0.0);
@@ -352,5 +531,47 @@ mod tests {
         assert!(rules[0].declarations.contains_key("height"));
         assert!(rules[0].declarations.contains_key("margin-top"));
         assert!(rules[0].declarations.contains_key("margin-right"));
+    }
+
+    #[test]
+    fn expands_border_shorthands() {
+        let css = r#"
+        .c {
+            border-width: 1px 2px 3px 4px;
+            border-color: red green blue yellow;
+            border-top: 5px white;
+        }
+        "#;
+
+        let (rest, rules) = parse_css(css).expect("border shorthands should parse");
+        assert!(rest.trim().is_empty());
+        let decls = &rules[0].declarations;
+        assert!(decls.contains_key("border-top-width"));
+        assert!(decls.contains_key("border-right-width"));
+        assert!(decls.contains_key("border-bottom-width"));
+        assert!(decls.contains_key("border-left-width"));
+        assert!(decls.contains_key("border-color-top"));
+        assert!(decls.contains_key("border-color-right"));
+        assert!(decls.contains_key("border-color-bottom"));
+        assert!(decls.contains_key("border-color-left"));
+    }
+
+    #[test]
+    fn expands_outline_shorthands() {
+        let css = r#"
+        .d {
+            outline-width: 3px;
+            outline-color: cyan;
+        }
+        "#;
+
+        let (rest, rules) = parse_css(css).expect("outline shorthands should parse");
+        assert!(rest.trim().is_empty());
+        let decls = &rules[0].declarations;
+        assert!(decls.contains_key("outline-width"));
+        assert!(decls.contains_key("outline-color-top"));
+        assert!(decls.contains_key("outline-color-right"));
+        assert!(decls.contains_key("outline-color-bottom"));
+        assert!(decls.contains_key("outline-color-left"));
     }
 }
