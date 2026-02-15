@@ -92,6 +92,12 @@ fill_color = 38
 stroke_color = 39
 # stroke_width = 40            →  [value:f32] [unit:u32]
 stroke_width = 40
+# justify_content = 41         →  [value:u32]
+# 0=flex-start, 1=center, 2=flex-end, 3=space-between, 4=space-around, 5=space-evenly
+justify_content = 41
+# align_items = 42             →  [value:u32]
+# 0=stretch, 1=flex-start, 2=center, 3=flex-end
+align_items = 42
 
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer

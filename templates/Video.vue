@@ -76,32 +76,27 @@
 }
 
 .workspace {
-  flex-grow: 1;
-  flex-direction: column;
+    flex-direction: column;
 }
 
 /* Preview Area */
 .preview-area {
-  flex-grow: 1;
-  background-color: #0c0c0c;
+    background-color: #0c0c0c;
   justify-content: center;
   align-items: center;
-  padding: 24px;
+  /* GPU shader unsupported for now: padding: 24px; */
 }
 
 .player-container {
   width: 80%;
-  aspect-ratio: 1.777; /* 16:9 */
+  /* GPU shader unsupported for now: aspect-ratio: 1.777; */ /* 16:9 */
   background-color: #1a1a1a;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+  /**border-radius: 12px;**/  /**overflow: hidden;**/  /* GPU shader unsupported for now: box-shadow: 0 20px 50px rgba(0,0,0,0.6); */
   flex-direction: column;
 }
 
 .video-mock {
-  flex-grow: 1;
-  background-color: #000;
+    background-color: #000;
   justify-content: center;
   align-items: center;
   position: relative;
@@ -110,17 +105,16 @@
 .play-overlay {
   width: 80px;
   height: 80px;
-  border-radius: 40px;
-  background-color: rgba(255,255,255,0.1);
+  /**border-radius: 40px;**/  background-color: rgba(255,255,255,0.1);
   justify-content: center;
   align-items: center;
-  border: 2px solid rgba(255,255,255,0.2);
+  /* GPU shader unsupported for now: border: 2px solid rgba(255,255,255,0.2); */
 }
 
 .icon-play-large {
   width: 40px;
   height: 40px;
-  opacity: 0.8;
+  /* GPU shader unsupported for now: opacity: 0.8; */
 }
 
 .player-controls {
@@ -128,8 +122,8 @@
   background-color: #1e1e1e;
   flex-direction: row;
   align-items: center;
-  padding: 0 20px;
-  border-top: 1px solid #333;
+  /* GPU shader unsupported for now: padding: 0 20px; */
+  /* GPU shader unsupported for now: border-top: 1px solid #333; */
 }
 
 .control-btn {
@@ -137,8 +131,7 @@
   height: 40px;
   justify-content: center;
   align-items: center;
-  border-radius: 20px;
-  margin: 0 4px;
+  /**border-radius: 20px;**/  /* GPU shader unsupported for now: margin: 0 4px; */
 }
 
 .control-btn:hover {
@@ -158,14 +151,14 @@
   margin-left: 20px;
   font-size: 14px;
   color: #888;
-  font-family: monospace;
+  
 }
 
 /* Timeline Area */
 .timeline-area {
   height: 300px;
   background-color: #1e1e1e;
-  border-top: 1px solid #333;
+  /* GPU shader unsupported for now: border-top: 1px solid #333; */
   flex-direction: column;
   position: relative;
 }
@@ -173,10 +166,9 @@
 .timeline-header {
   height: 40px;
   background-color: #252525;
-  border-bottom: 1px solid #333;
-  flex-direction: row;
+    flex-direction: row;
   align-items: center;
-  padding: 0 12px;
+  /* GPU shader unsupported for now: padding: 0 12px; */
 }
 
 .timeline-tool {
@@ -184,8 +176,7 @@
   height: 28px;
   justify-content: center;
   align-items: center;
-  border-radius: 4px;
-  margin-right: 4px;
+  /**border-radius: 4px;**/  margin-right: 4px;
 }
 
 .timeline-tool:hover {
@@ -195,57 +186,51 @@
 .timeline-ruler {
   height: 24px;
   background-color: #1a1a1a;
-  border-bottom: 1px solid #333;
-  flex-direction: row;
-  padding-left: 100px;
+    flex-direction: row;
+  /* GPU shader unsupported for now: padding-left: 100px; */
 }
 
 .ruler-mark {
   width: 100px;
   font-size: 10px;
   color: #555;
-  padding-top: 4px;
-  border-left: 1px solid #222;
-  padding-left: 4px;
+  /* GPU shader unsupported for now: padding-top: 4px; */
+  /* GPU shader unsupported for now: border-left: 1px solid #222; */
+  /* GPU shader unsupported for now: padding-left: 4px; */
 }
 
 .tracks {
-  flex-grow: 1;
-  flex-direction: column;
-  overflow-y: scroll;
-}
+    flex-direction: column;
+  /**overflow-y: scroll;**/}
 
 .track {
   height: 60px;
   flex-direction: row;
-  border-bottom: 1px solid #2a2a2a;
-}
+  }
 
 .track-label {
   width: 100px;
   background-color: #222;
   justify-content: center;
-  padding-left: 12px;
+  /* GPU shader unsupported for now: padding-left: 12px; */
   font-size: 12px;
   color: #888;
-  border-right: 1px solid #333;
+  /* GPU shader unsupported for now: border-right: 1px solid #333; */
 }
 
 .track-content {
-  flex-grow: 1;
-  position: relative;
+    position: relative;
   background-color: #161616;
 }
 
 .clip {
   position: absolute;
   top: 10px;
-  bottom: 10px;
-  border-radius: 4px;
-  padding: 8px;
+  //bottom: 10px;
+  /**border-radius: 4px;**/  /* GPU shader unsupported for now: padding: 8px; */
   font-size: 11px;
   color: rgba(255,255,255,0.8);
-  border: 1px solid rgba(0,0,0,0.2);
+  /* GPU shader unsupported for now: border: 1px solid rgba(0,0,0,0.2); */
 }
 
 .clip.orange {
@@ -259,7 +244,7 @@
 .playhead {
   position: absolute;
   top: 40px;
-  bottom: 0;
+  //bottom: 0;
   left: 350px;
   width: 2px;
   background-color: #e74c3c;
@@ -267,15 +252,15 @@
 }
 
 .playhead::after {
-  content: "";
+  //content: "";
   position: absolute;
   top: 0;
   left: -4px;
   width: 0;
   height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 8px solid #e74c3c;
+  /* GPU shader unsupported for now: border-left: 5px solid transparent; */
+  /* GPU shader unsupported for now: border-right: 5px solid transparent; */
+  /* GPU shader unsupported for now: border-top: 8px solid #e74c3c; */
 }
 
 .icon-mini {
@@ -284,6 +269,5 @@
 }
 
 .spacer {
-  flex-grow: 1;
-}
+  }
 </style>

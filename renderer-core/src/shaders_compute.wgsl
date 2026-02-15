@@ -19,6 +19,8 @@ struct Node {
     z_index: f32,
     position_mode: u32,
     flex_direction: u32,
+    justify_content: u32,
+    align_items: u32,
 
     parent_index: u32,
     child_start_index: u32,
@@ -418,6 +420,53 @@ fn process_node_height(id: u32) {
     }
 }
 
+fn justify_distribution(mode: u32, free_space: f32, item_count: u32) -> vec2<f32> {
+    // Returns (leading_space, between_space) along the main axis.
+    if (item_count == 0u || free_space <= 0.0) {
+        return vec2<f32>(0.0, 0.0);
+    }
+
+    switch (mode) {
+        case 1u: { // center
+            return vec2<f32>(free_space * 0.5, 0.0);
+        }
+        case 2u: { // flex-end
+            return vec2<f32>(free_space, 0.0);
+        }
+        case 3u: { // space-between
+            if (item_count > 1u) {
+                return vec2<f32>(0.0, free_space / f32(item_count - 1u));
+            }
+            return vec2<f32>(0.0, 0.0);
+        }
+        case 4u: { // space-around
+            let gap = free_space / f32(item_count);
+            return vec2<f32>(gap * 0.5, gap);
+        }
+        case 5u: { // space-evenly
+            let gap = free_space / f32(item_count + 1u);
+            return vec2<f32>(gap, gap);
+        }
+        default: { // flex-start
+            return vec2<f32>(0.0, 0.0);
+        }
+    }
+}
+
+fn align_offset(mode: u32, free_space: f32) -> f32 {
+    // stretch and flex-start both align from the start edge.
+    if (free_space <= 0.0) {
+        return 0.0;
+    }
+    if (mode == 2u) { // center
+        return free_space * 0.5;
+    }
+    if (mode == 3u) { // flex-end
+        return free_space;
+    }
+    return 0.0;
+}
+
 // PASS 4: Final Layout (Top-Down)
 @compute @workgroup_size(64)
 fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -444,9 +493,12 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                  nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].left_offset + nodes[id].margin_left;
                  nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].top_offset + nodes[id].margin_top;
             } else { // Relative
+                let parent_inner_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width;
+                let parent_inner_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width;
+                let start = nodes[parent_id].child_start_index;
+                let end = start + nodes[parent_id].child_count;
+
                 if (nodes[parent_id].flex_direction == 1u) { // Column
-                    nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].margin_left;
-                    
                     let available_parent_inner_height = max(0.0, nodes[parent_id].final_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
                     let parent_natural_inner_height = max(0.0, nodes[parent_id].desired_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
                     
@@ -455,39 +507,75 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         ratio = available_parent_inner_height / parent_natural_inner_height;
                     }
                     
-                    nodes[id].final_height = max(0.0, (nodes[id].desired_height + nodes[id].margin_top + nodes[id].margin_bottom) * ratio - nodes[id].margin_top - nodes[id].margin_bottom);
+                    let my_outer_main = (nodes[id].desired_height + nodes[id].margin_top + nodes[id].margin_bottom) * ratio;
+                    nodes[id].final_height = max(0.0, my_outer_main - nodes[id].margin_top - nodes[id].margin_bottom);
 
-                    var y_cursor = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width;
-                    let start = nodes[parent_id].child_start_index;
-                    
-                    // Sum previous siblings only if they are relative
-                    for (var i = start; i < id; i = i + 1u) {
+                    var relative_count = 0u;
+                    var total_outer_main = 0.0;
+                    for (var i = start; i < end; i = i + 1u) {
                         if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
-                            y_cursor += (nodes[i].desired_height + nodes[i].margin_top + nodes[i].margin_bottom) * ratio;
+                            total_outer_main += (nodes[i].desired_height + nodes[i].margin_top + nodes[i].margin_bottom) * ratio;
+                            relative_count += 1u;
                         }
                     }
-                    nodes[id].final_y = y_cursor + nodes[id].margin_top;
+
+                    let free_main = max(0.0, available_parent_inner_height - total_outer_main);
+                    let main_distribution = justify_distribution(nodes[parent_id].justify_content, free_main, relative_count);
+
+                    var main_before = 0.0;
+                    for (var i = start; i < id; i = i + 1u) {
+                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
+                            main_before += (nodes[i].desired_height + nodes[i].margin_top + nodes[i].margin_bottom) * ratio + main_distribution.y;
+                        }
+                    }
+
+                    nodes[id].final_y = parent_inner_y + main_distribution.x + main_before + nodes[id].margin_top;
+
+                    let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
+                    let my_outer_cross = nodes[id].final_width + nodes[id].margin_left + nodes[id].margin_right;
+                    let free_cross = max(0.0, available_parent_inner_width - my_outer_cross);
+                    let cross_shift = align_offset(nodes[parent_id].align_items, free_cross);
+                    nodes[id].final_x = parent_inner_x + cross_shift + nodes[id].margin_left;
                     
                 } else { // Row
                     let available_parent_inner_height = max(0.0, nodes[parent_id].final_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
                     if (nodes[id].fixed_height >= 0.0) {
                         nodes[id].final_height = nodes[id].fixed_height;
                     } else {
-                        nodes[id].final_height = max(0.0, available_parent_inner_height - nodes[id].margin_top - nodes[id].margin_bottom);
-                    }
-
-                    nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].margin_top;
-                    
-                    var x_cursor = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width;
-                    let start = nodes[parent_id].child_start_index;
-                    
-                     // Sum previous siblings only if they are relative
-                    for (var i = start; i < id; i = i + 1u) {
-                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
-                            x_cursor += nodes[i].final_width + nodes[i].margin_left + nodes[i].margin_right;
+                        if (nodes[parent_id].align_items == 0u) { // stretch
+                            nodes[id].final_height = max(0.0, available_parent_inner_height - nodes[id].margin_top - nodes[id].margin_bottom);
+                        } else {
+                            nodes[id].final_height = max(0.0, nodes[id].desired_height);
                         }
                     }
-                    nodes[id].final_x = x_cursor + nodes[id].margin_left;
+
+                    var relative_count = 0u;
+                    var total_outer_main = 0.0;
+                    let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
+
+                    for (var i = start; i < end; i = i + 1u) {
+                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
+                            total_outer_main += nodes[i].final_width + nodes[i].margin_left + nodes[i].margin_right;
+                            relative_count += 1u;
+                        }
+                    }
+
+                    let free_main = max(0.0, available_parent_inner_width - total_outer_main);
+                    let main_distribution = justify_distribution(nodes[parent_id].justify_content, free_main, relative_count);
+
+                    var main_before = 0.0;
+                    for (var i = start; i < id; i = i + 1u) {
+                        if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
+                            main_before += nodes[i].final_width + nodes[i].margin_left + nodes[i].margin_right + main_distribution.y;
+                        }
+                    }
+
+                    nodes[id].final_x = parent_inner_x + main_distribution.x + main_before + nodes[id].margin_left;
+
+                    let my_outer_cross = nodes[id].final_height + nodes[id].margin_top + nodes[id].margin_bottom;
+                    let free_cross = max(0.0, available_parent_inner_height - my_outer_cross);
+                    let cross_shift = align_offset(nodes[parent_id].align_items, free_cross);
+                    nodes[id].final_y = parent_inner_y + cross_shift + nodes[id].margin_top;
                 }
             }
             atomicStore(&nodes[id].signals_finished, 1u);
@@ -557,6 +645,16 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
             }
             case PROP_FLEX_DIRECTION: {
                 if (apply) { nodes[id].flex_direction = get_style_val(buffer_selector, pos); }
+                pos = pos + 1u;
+                break;
+            }
+            case PROP_JUSTIFY_CONTENT: {
+                if (apply) { nodes[id].justify_content = get_style_val(buffer_selector, pos); }
+                pos = pos + 1u;
+                break;
+            }
+            case PROP_ALIGN_ITEMS: {
+                if (apply) { nodes[id].align_items = get_style_val(buffer_selector, pos); }
                 pos = pos + 1u;
                 break;
             }
@@ -866,6 +964,8 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].z_index = 0.0;
     nodes[id].position_mode = 0u;
     nodes[id].flex_direction = 0u;
+    nodes[id].justify_content = 0u;
+    nodes[id].align_items = 0u;
     nodes[id].padding_top = 0.0;
     nodes[id].padding_right = 0.0;
     nodes[id].padding_bottom = 0.0;

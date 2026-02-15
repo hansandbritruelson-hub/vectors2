@@ -362,6 +362,8 @@ pub struct GpuNode {
     pub z_index: f32,
     pub position_mode: u32, // 0 = Relative, 1 = Absolute
     pub flex_direction: u32, // 0 = Row, 1 = Column
+    pub justify_content: u32, // 0 = flex-start, 1 = center, 2 = flex-end, 3 = space-between, 4 = space-around, 5 = space-evenly
+    pub align_items: u32, // 0 = stretch, 1 = flex-start, 2 = center, 3 = flex-end
 
     // --- Tree Topology (GPU Linear) ---
     pub parent_index: u32,
@@ -437,13 +439,12 @@ pub struct GpuNode {
     pub stroke_color: u32,
     pub stroke_width: f32,
     
-    pub _pad_styles: u32, // Padding to 276 bytes
+    pub _pad_styles: u32, // Padding to 284 bytes
 }
 
 #[test]
 fn test_gpu_node_size() {
-    // Adding 4 fields (16 bytes) to GpuNode. 260 + 16 = 276.
-    assert_eq!(std::mem::size_of::<GpuNode>(), 276);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 284);
 }
 
 impl GpuNode {
@@ -470,6 +471,8 @@ impl GpuNode {
             z_index: 0.0,
             position_mode: 0,
             flex_direction: 0,
+            justify_content: 0,
+            align_items: 0,
             parent_index: 0,
             child_start_index: 0,
             child_count: 0,
@@ -538,6 +541,8 @@ pub struct CpuNode {
     pub z_index: Option<f32>,
     pub position_mode: u32,
     pub flex_direction: u32,
+    pub justify_content: u32,
+    pub align_items: u32,
     pub flags: u32,
     
     // Text
@@ -582,6 +587,8 @@ impl CpuNode {
             z_index: None,
             position_mode: 0,
             flex_direction: 0, // Row
+            justify_content: 0, // flex-start
+            align_items: 0, // stretch
             flags: 1,
             
             text: None,
@@ -1045,6 +1052,28 @@ impl FlexEngine {
                         }
                     }
                 }
+                "justify-content" => {
+                    if let StyleValue::Ident(s) = val {
+                        self.cpu_nodes[node_idx].justify_content = match s.as_str() {
+                            "center" => 1,
+                            "flex-end" | "end" | "right" => 2,
+                            "space-between" => 3,
+                            "space-around" => 4,
+                            "space-evenly" => 5,
+                            _ => 0, // flex-start
+                        };
+                    }
+                }
+                "align-items" => {
+                    if let StyleValue::Ident(s) = val {
+                        self.cpu_nodes[node_idx].align_items = match s.as_str() {
+                            "flex-start" | "start" | "left" => 1,
+                            "center" => 2,
+                            "flex-end" | "end" | "right" => 3,
+                            _ => 0, // stretch (and baseline fallback)
+                        };
+                    }
+                }
                 "z-index" => {
                     if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].z_index = Some(v); }
                 }
@@ -1216,6 +1245,36 @@ impl FlexEngine {
                         "column" => dest.push(1),
                         _ => dest.push(0), // row
                     }
+                } else {
+                    dest.push(0);
+                }
+            }
+            "justify-content" => {
+                dest.push(PROP_JUSTIFY_CONTENT);
+                if let StyleValue::Ident(s) = val {
+                    let mode = match s.as_str() {
+                        "center" => 1,
+                        "flex-end" | "end" | "right" => 2,
+                        "space-between" => 3,
+                        "space-around" => 4,
+                        "space-evenly" => 5,
+                        _ => 0, // flex-start
+                    };
+                    dest.push(mode);
+                } else {
+                    dest.push(0);
+                }
+            }
+            "align-items" => {
+                dest.push(PROP_ALIGN_ITEMS);
+                if let StyleValue::Ident(s) = val {
+                    let mode = match s.as_str() {
+                        "flex-start" | "start" | "left" => 1,
+                        "center" => 2,
+                        "flex-end" | "end" | "right" => 3,
+                        _ => 0, // stretch (and baseline fallback)
+                    };
+                    dest.push(mode);
                 } else {
                     dest.push(0);
                 }

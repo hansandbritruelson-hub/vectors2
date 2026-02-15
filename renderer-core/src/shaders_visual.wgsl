@@ -19,6 +19,8 @@ struct Node {
     z_index: f32,
     position_mode: u32,
     flex_direction: u32,
+    justify_content: u32,
+    align_items: u32,
 
     parent_index: u32,
     child_start_index: u32,

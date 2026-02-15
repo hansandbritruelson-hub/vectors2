@@ -116,6 +116,7 @@ mod tests {
             fill_color: 0,
             stroke_color: 0,
             stroke_width: 0,
+            text_color: 0xFFFFFFFF,
         };
         // Create dummy pixels
         let pixels = vec![0u8; (100 * 100 * 4) as usize];

@@ -2,10 +2,10 @@
 #![allow(dead_code)]
 use nom::{
     bytes::complete::{tag, take_until, is_not, take_while1},
-    character::complete::{multispace0, multispace1, alphanumeric1, hex_digit1},
+    character::complete::{multispace1, alphanumeric1, hex_digit1},
     multi::{many0, separated_list0},
     sequence::{delimited, pair, preceded, terminated, tuple},
-    combinator::{map, opt, recognize},
+    combinator::{map, opt, recognize, value},
     branch::alt,
     IResult,
 };
@@ -70,7 +70,7 @@ fn color_hex(input: &str) -> IResult<&str, StyleValue> {
 
 fn color_rgb(input: &str) -> IResult<&str, StyleValue> {
     let (input, _) = alt((tag("rgba("), tag("rgb(")))(input)?;
-    let (input, vals) = separated_list0(tuple((multispace0, tag(","), multispace0)), parse_f32)(input)?;
+    let (input, vals) = separated_list0(tuple((ws0, tag(","), ws0)), parse_f32)(input)?;
     let (input, _) = tag(")")(input)?;
     
     let r = vals.get(0).cloned().unwrap_or(0.0) / 255.0;
@@ -79,6 +79,28 @@ fn color_rgb(input: &str) -> IResult<&str, StyleValue> {
     let a = vals.get(3).cloned().unwrap_or(1.0);
     
     Ok((input, StyleValue::Color(r, g, b, a)))
+}
+
+fn single_line_comment(input: &str) -> IResult<&str, ()> {
+    let (input, _) = tag("//")(input)?;
+    if let Some(idx) = input.find('\n') {
+        Ok((&input[idx..], ()))
+    } else {
+        Ok(("", ()))
+    }
+}
+
+fn multi_line_comment(input: &str) -> IResult<&str, ()> {
+    value((), tuple((tag("/*"), take_until("*/"), tag("*/"))))(input)
+}
+
+fn ws0(input: &str) -> IResult<&str, ()> {
+    value((), many0(alt((value((), multispace1), single_line_comment, multi_line_comment))))(input)
+}
+
+fn ws1(input: &str) -> IResult<&str, ()> {
+    let (input, _) = alt((value((), multispace1), single_line_comment, multi_line_comment))(input)?;
+    value((), many0(alt((value((), multispace1), single_line_comment, multi_line_comment))))(input)
 }
 
 fn style_value(input: &str) -> IResult<&str, StyleValue> {
@@ -97,25 +119,25 @@ fn style_value(input: &str) -> IResult<&str, StyleValue> {
 }
 
 fn declaration(input: &str) -> IResult<&str, (String, Vec<StyleValue>)> {
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
     let (input, property) = is_not(":}")(input)?;
     let (input, _) = tag(":")(input)?;
-    let (input, _) = multispace0(input)?;
-    let (input, values) = separated_list0(multispace1, style_value)(input)?;
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
+    let (input, values) = separated_list0(ws1, style_value)(input)?;
+    let (input, _) = ws0(input)?;
     let (input, _) = tag(";")(input)?;
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
     Ok((input, (property.trim().to_string(), values)))
 }
 
 fn rule(input: &str) -> IResult<&str, StyleRule> {
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
     let (input, selector) = is_not("{")(input)?;
     let (input, _) = tag("{")(input)?;
     let (input, decls) = many0(declaration)(input)?;
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
     let (input, _) = tag("}")(input)?;
-    let (input, _) = multispace0(input)?;
+    let (input, _) = ws0(input)?;
 
     let mut declarations = HashMap::new();
     for (p, vals) in decls {
@@ -280,5 +302,55 @@ fn rule(input: &str) -> IResult<&str, StyleRule> {
 }
 
 pub fn parse_css(input: &str) -> IResult<&str, Vec<StyleRule>> {
-    many0(rule)(input)
+    let (input, _) = ws0(input)?;
+    let (input, rules) = many0(rule)(input)?;
+    let (input, _) = ws0(input)?;
+    Ok((input, rules))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_single_line_comments() {
+        let css = r#"
+        // before
+        .a {
+            color: #ff0000; // trailing
+            // between declarations
+            width: 10px;
+        }
+        "#;
+
+        let (rest, rules) = parse_css(css).expect("css with // comments should parse");
+        assert!(rest.trim().is_empty());
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector, ".a");
+        assert!(rules[0].declarations.contains_key("color"));
+        assert!(rules[0].declarations.contains_key("width"));
+    }
+
+    #[test]
+    fn parses_multi_line_comments() {
+        let css = r#"
+        /* before */
+        .b {
+            /* comment in block */
+            height: 20px;
+            /* multi-line
+               comment */
+            margin: 4px 8px;
+        }
+        /* after */
+        "#;
+
+        let (rest, rules) = parse_css(css).expect("css with /* */ comments should parse");
+        assert!(rest.trim().is_empty());
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].selector, ".b");
+        assert!(rules[0].declarations.contains_key("height"));
+        assert!(rules[0].declarations.contains_key("margin-top"));
+        assert!(rules[0].declarations.contains_key("margin-right"));
+    }
 }

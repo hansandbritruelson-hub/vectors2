@@ -43,16 +43,15 @@
   height: 100%;
   flex-direction: column;
   background-color: #0c0c0c;
-  font-family: 'Inter', system-ui, sans-serif;
+  
 }
 
 .app-header {
   height: 56px;
   flex-direction: row;
   background-color: #1e1e1e;
-  border-bottom: 1px solid #333;
-  align-items: center;
-  padding: 0 20px;
+    align-items: center;
+  /* GPU shader unsupported for now: padding: 0 20px; */
 }
 
 .app-logo {
@@ -65,15 +64,14 @@
   width: 24px;
   height: 24px;
   background-color: #3498db;
-  border-radius: 4px;
-  margin-right: 12px;
+  /**border-radius: 4px;**/  margin-right: 12px;
 }
 
 .logo-text {
   font-size: 14px;
-  font-weight: 700;
+  //font-weight: 700;
   color: #fff;
-  letter-spacing: 0.1em;
+  //letter-spacing: 0.1em;
 }
 
 .main-nav {
@@ -83,10 +81,10 @@
 
 .nav-tab {
   height: 100%;
-  padding: 0 24px;
+  /* GPU shader unsupported for now: padding: 0 24px; */
   justify-content: center;
   font-size: 13px;
-  font-weight: 500;
+  //font-weight: 500;
   color: #888;
   position: relative;
 }
@@ -100,11 +98,11 @@
 }
 
 .nav-tab.active::after {
-  content: "";
+  //content: "";
   position: absolute;
-  bottom: 0;
+  //bottom: 0;
   left: 0;
-  right: 0;
+  /* GPU shader unsupported for now: right: 0; */
   height: 2px;
   background-color: #3498db;
 }
@@ -113,38 +111,34 @@
   flex-direction: row;
   align-items: center;
   background-color: #252525;
-  padding: 6px 12px;
-  border-radius: 20px;
-  border: 1px solid #333;
+  /* GPU shader unsupported for now: padding: 6px 12px; */
+  /**border-radius: 20px;**/  /* GPU shader unsupported for now: border: 1px solid #333; */
 }
 
 .status-dot {
   width: 8px;
   height: 8px;
   background-color: #2ecc71;
-  border-radius: 4px;
-  margin-right: 8px;
-  box-shadow: 0 0 10px rgba(46, 204, 113, 0.5);
+  /**border-radius: 4px;**/  margin-right: 8px;
+  /* GPU shader unsupported for now: box-shadow: 0 0 10px rgba(46, 204, 113, 0.5); */
 }
 
 .status-text {
   font-size: 10px;
-  font-weight: 700;
+  //font-weight: 700;
   color: #2ecc71;
 }
 
 .view-content {
-  flex-grow: 1;
-  flex-direction: column;
+    flex-direction: column;
 }
 
 .font-size-test {
   font-size: 100px;
   color: #f1c40f;
-  margin: 20px;
+  /* GPU shader unsupported for now: margin: 20px; */
 }
 
 .spacer {
-  flex-grow: 1;
-}
+  }
 </style>
