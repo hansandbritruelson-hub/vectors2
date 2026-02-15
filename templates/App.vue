@@ -33,9 +33,9 @@
         <div class="status-text">GPU Ready</div>
       </div>
     </div>
-    
+    <div style="max-width:10px; background-color: #FF0000">SUPER LONG TEXT HERE</div>
     <div class="view-content">
-      <Image v-if="view == 'image'" />
+      <Image v-if="view == 'image'" :design="design.clone()" />
       <Video v-if="view == 'video'" />
       <CssDemo v-if="view == 'css-demo'" />
     </div>
@@ -47,7 +47,10 @@
     mod Video;
     mod CssDemo;
     
+    use crate::design::Design;
+    
     let (view, set_view) = crate::signals::create_signal("image".to_string());
+    let design = Rc::new(Design { path: "assets/project.gemini".to_string() });
 </script>
 
 <style>

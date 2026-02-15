@@ -1,7 +1,14 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
     min_width: f32,
+    max_width: f32, // -1.0 = none
     fixed_height: f32, // -1.0 = auto
+    min_height: f32,
+    max_height: f32, // -1.0 = none
+    base_min_width: f32,
+    base_max_width: f32,
+    base_min_height: f32,
+    base_max_height: f32,
     final_width: f32,
     
     desired_height: f32,
@@ -291,14 +298,32 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
+fn clamp_width(id: u32, w: f32) -> f32 {
+    var clamped = max(0.0, w);
+    clamped = max(clamped, nodes[id].min_width);
+    if (nodes[id].max_width >= 0.0) {
+        clamped = min(clamped, nodes[id].max_width);
+    }
+    return clamped;
+}
+
 fn get_negotiated_outer_width(id: u32) -> f32 {
     var base_w = 0.0;
     if (nodes[id].fixed_width >= 0.0) {
         base_w = nodes[id].fixed_width;
     } else {
-        base_w = max(nodes[id].min_width, nodes[id].natural_content_width);
+        base_w = nodes[id].natural_content_width;
     }
-    return base_w + nodes[id].margin_left + nodes[id].margin_right;
+    return clamp_width(id, base_w) + nodes[id].margin_left + nodes[id].margin_right;
+}
+
+fn clamp_height(id: u32, h: f32) -> f32 {
+    var clamped = max(0.0, h);
+    clamped = max(clamped, nodes[id].min_height);
+    if (nodes[id].max_height >= 0.0) {
+        clamped = min(clamped, nodes[id].max_height);
+    }
+    return clamped;
 }
 
 fn process_node_width(id: u32) {
@@ -352,7 +377,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     let parent_id = nodes[id].parent_index;
     if (parent_id == id) {
-        nodes[id].final_width = uniforms.screen_width;
+        nodes[id].final_width = clamp_width(id, uniforms.screen_width);
         atomicStore(&nodes[id].signals_finished, 1u);
     } else {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
@@ -363,7 +388,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 if (nodes[id].fixed_width >= 0.0) {
                     nodes[id].final_width = nodes[id].fixed_width;
                 } else {
-                    nodes[id].final_width = max(nodes[id].min_width, nodes[id].natural_content_width);
+                    nodes[id].final_width = nodes[id].natural_content_width;
                 }
             } else {
                 // Relative/Flex
@@ -392,6 +417,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
+            nodes[id].final_width = clamp_width(id, nodes[id].final_width);
             atomicStore(&nodes[id].signals_finished, 1u);
         }
     }
@@ -435,7 +461,7 @@ fn process_node_height(id: u32) {
     }
 
     if (nodes[id].fixed_height >= 0.0) {
-        nodes[id].desired_height = nodes[id].fixed_height;
+        nodes[id].desired_height = clamp_height(id, nodes[id].fixed_height);
         return;
     }
 
@@ -465,6 +491,7 @@ fn process_node_height(id: u32) {
         }
         nodes[id].desired_height = result_height + nodes[id].padding_top + nodes[id].padding_bottom + border_v;
     }
+    nodes[id].desired_height = clamp_height(id, nodes[id].desired_height);
 }
 
 fn justify_distribution(mode: u32, free_space: f32, item_count: u32) -> vec2<f32> {
@@ -530,13 +557,13 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (parent_id == id) {
         nodes[id].final_x = 0.0;
         nodes[id].final_y = 0.0;
-        nodes[id].final_height = uniforms.screen_height; 
+        nodes[id].final_height = clamp_height(id, uniforms.screen_height); 
         atomicStore(&nodes[id].signals_finished, 1u);
     } else {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
             
             if (nodes[id].position_mode == 1u) { // Absolute
-                 nodes[id].final_height = nodes[id].desired_height;
+                 nodes[id].final_height = clamp_height(id, nodes[id].desired_height);
                  nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].left_offset + nodes[id].margin_left;
                  nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].top_offset + nodes[id].margin_top;
             } else { // Relative
@@ -556,6 +583,7 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     
                     let my_outer_main = (nodes[id].desired_height + nodes[id].margin_top + nodes[id].margin_bottom) * ratio;
                     nodes[id].final_height = max(0.0, my_outer_main - nodes[id].margin_top - nodes[id].margin_bottom);
+                    nodes[id].final_height = clamp_height(id, nodes[id].final_height);
 
                     var relative_count = 0u;
                     var total_outer_main = 0.0;
@@ -595,6 +623,7 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             nodes[id].final_height = max(0.0, nodes[id].desired_height);
                         }
                     }
+                    nodes[id].final_height = clamp_height(id, nodes[id].final_height);
 
                     var relative_count = 0u;
                     var total_outer_main = 0.0;
@@ -686,6 +715,42 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                     let unit = get_style_val(buffer_selector, pos + 1u);
                     if (unit == UNIT_PX) { nodes[id].fixed_height = val; }
                     else { nodes[id].fixed_height = -1.0; }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_MIN_WIDTH: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].min_width = max(0.0, val); }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_MAX_WIDTH: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].max_width = max(0.0, val); }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_MIN_HEIGHT: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].min_height = max(0.0, val); }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_MAX_HEIGHT: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].max_height = max(0.0, val); }
                 }
                 pos = pos + 2u;
                 break;
@@ -1042,7 +1107,11 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Default values for style properties
     nodes[id].fixed_width = -1.0;
+    nodes[id].min_width = nodes[id].base_min_width;
+    nodes[id].max_width = nodes[id].base_max_width;
     nodes[id].fixed_height = -1.0;
+    nodes[id].min_height = nodes[id].base_min_height;
+    nodes[id].max_height = nodes[id].base_max_height;
     nodes[id].color_r = 0.0;
     nodes[id].color_g = 0.0;
     nodes[id].color_b = 0.0;

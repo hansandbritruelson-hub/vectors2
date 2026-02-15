@@ -80,7 +80,7 @@
           <div class="layer-list">
             <div class="layer-item active">
               <img src="asset://phosphor/circle.svg" class="icon-img-mini" />
-              <div class="layer-name">Circle 1</div>
+              <div class="layer-name">[[ props.design.path ]]</div>
             </div>
             <div class="layer-item">
               <img src="asset://phosphor/square.svg" class="icon-img-mini" />
@@ -96,6 +96,14 @@
     </div>
   </div>
 </template>
+
+<script>
+  use crate::design::Design;
+
+  pub struct Props {
+    pub design: Rc<Design>
+  }
+</script>
 
 <style>
 .editor-container {

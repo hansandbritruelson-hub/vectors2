@@ -1,7 +1,14 @@
 struct Node {
     fixed_width: f32, // -1.0 = auto
     min_width: f32,
+    max_width: f32, // -1.0 = none
     fixed_height: f32, // -1.0 = auto
+    min_height: f32,
+    max_height: f32, // -1.0 = none
+    base_min_width: f32,
+    base_max_width: f32,
+    base_min_height: f32,
+    base_max_height: f32,
     final_width: f32,
     
     desired_height: f32,

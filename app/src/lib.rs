@@ -9,6 +9,7 @@ pub mod generated_assets {
 }
 
 // Include generated UI
+pub mod design;
 pub mod generated_ui;
 
 #[wasm_bindgen(start)]

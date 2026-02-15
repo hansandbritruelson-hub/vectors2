@@ -341,7 +341,14 @@ pub struct GpuNode {
     // --- Layout Inputs ---
     pub fixed_width: f32,   // -1.0 = auto
     pub min_width: f32,
+    pub max_width: f32,     // -1.0 = none
     pub fixed_height: f32,  // -1.0 = auto
+    pub min_height: f32,
+    pub max_height: f32,    // -1.0 = none
+    pub base_min_width: f32,
+    pub base_max_width: f32,
+    pub base_min_height: f32,
+    pub base_max_height: f32,
     
     // --- Computed Values ---
     pub final_width: f32,
@@ -450,7 +457,7 @@ pub struct GpuNode {
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 308);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 336);
 }
 
 impl GpuNode {
@@ -458,7 +465,14 @@ impl GpuNode {
         Self {
             fixed_width: -1.0,
             min_width: 0.0,
+            max_width: -1.0,
             fixed_height: -1.0,
+            min_height: 0.0,
+            max_height: -1.0,
+            base_min_width: 0.0,
+            base_max_width: -1.0,
+            base_min_height: 0.0,
+            base_max_height: -1.0,
             final_width: 0.0,
             desired_height: 0.0,
             final_height: 0.0,
@@ -546,7 +560,10 @@ pub struct CpuNode {
     // Properties (Mirrored from GpuNode Inputs)
     pub fixed_width: f32,
     pub min_width: f32,
+    pub max_width: f32,
     pub fixed_height: f32,
+    pub min_height: f32,
+    pub max_height: f32,
     pub color: (f32, f32, f32, f32),
     pub top_offset: f32,
     pub left_offset: f32,
@@ -592,7 +609,10 @@ impl CpuNode {
             
             fixed_width: -1.0,
             min_width: 0.0,
+            max_width: -1.0,
             fixed_height: -1.0,
+            min_height: 0.0,
+            max_height: -1.0,
             color: (0.0, 0.0, 0.0, 0.0),
             top_offset: 0.0,
             left_offset: 0.0,
@@ -1036,6 +1056,18 @@ impl FlexEngine {
                 "height" => {
                     if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_height = v; }
                 }
+                "min-width" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].min_width = v.max(0.0); }
+                }
+                "max-width" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].max_width = v.max(0.0); }
+                }
+                "min-height" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].min_height = v.max(0.0); }
+                }
+                "max-height" => {
+                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].max_height = v.max(0.0); }
+                }
                 "background-color" => {
                     if let StyleValue::Color(r, g, b, a) = val { self.cpu_nodes[node_idx].color = (r, g, b, a); }
                 }
@@ -1298,6 +1330,46 @@ impl FlexEngine {
                         dest.push(0f32.to_bits());
                         dest.push(UNIT_PX);
                     }
+                }
+            }
+            "min-width" => {
+                dest.push(PROP_MIN_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
+                } else {
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
+                }
+            }
+            "max-width" => {
+                dest.push(PROP_MAX_WIDTH);
+                if let StyleValue::Px(v) = val {
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
+                } else {
+                    dest.push((-1.0f32).to_bits());
+                    dest.push(UNIT_PX);
+                }
+            }
+            "min-height" => {
+                dest.push(PROP_MIN_HEIGHT);
+                if let StyleValue::Px(v) = val {
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
+                } else {
+                    dest.push(0f32.to_bits());
+                    dest.push(UNIT_PX);
+                }
+            }
+            "max-height" => {
+                dest.push(PROP_MAX_HEIGHT);
+                if let StyleValue::Px(v) = val {
+                    dest.push(v.to_bits());
+                    dest.push(UNIT_PX);
+                } else {
+                    dest.push((-1.0f32).to_bits());
+                    dest.push(UNIT_PX);
                 }
             }
             "flex-direction" => {
@@ -2043,6 +2115,9 @@ impl FlexEngine {
             let cn_first_child = self.cpu_nodes[cpu_idx].first_child;
             let cn_parent = self.cpu_nodes[cpu_idx].parent;
             let cn_min_width = self.cpu_nodes[cpu_idx].min_width;
+            let cn_max_width = self.cpu_nodes[cpu_idx].max_width;
+            let cn_min_height = self.cpu_nodes[cpu_idx].min_height;
+            let cn_max_height = self.cpu_nodes[cpu_idx].max_height;
             let cn_flags = self.cpu_nodes[cpu_idx].flags;
             let cn_cached_texture_region = self.cpu_nodes[cpu_idx].cached_texture.as_ref().map(|h| {
                 (h.region.u_min, h.region.v_min, h.region.u_max, h.region.v_max)
@@ -2092,6 +2167,13 @@ impl FlexEngine {
                 let gpu_node = &mut self.gpu_nodes[gpu_idx as usize];
                 // Mirror non-style props (class-resolved props handled by GPU resolve_styles pass)
                 gpu_node.min_width = cn_min_width;
+                gpu_node.max_width = cn_max_width;
+                gpu_node.min_height = cn_min_height;
+                gpu_node.max_height = cn_max_height;
+                gpu_node.base_min_width = cn_min_width;
+                gpu_node.base_max_width = cn_max_width;
+                gpu_node.base_min_height = cn_min_height;
+                gpu_node.base_max_height = cn_max_height;
                 gpu_node.flags = cn_flags;
                 if self.cpu_nodes[cpu_idx].hovered {
                     gpu_node.flags |= 16; // Bit 4 = Hovered
