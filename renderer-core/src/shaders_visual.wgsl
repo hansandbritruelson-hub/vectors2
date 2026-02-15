@@ -86,6 +86,12 @@ struct Node {
     text_color_b: f32,
     text_color_a: f32,
 
+    text_align: u32,
+    line_height: f32,
+    letter_spacing: f32,
+    word_spacing: f32,
+    font_weight: u32,
+    font_style: u32,
     font_size: f32,
 
     fill_color: u32,
@@ -331,6 +337,12 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     else if (vertex_index == 3u) { corner = vec2(-padding, h + padding); }
     else if (vertex_index == 4u) { corner = vec2(w + padding, -padding); }
     else if (vertex_index == 5u) { corner = vec2(w + padding, h + padding); }
+
+    // Fake italic/oblique via geometric shear.
+    if (node.font_style == 1u || node.font_style == 2u) {
+        let shear = select(0.12, 0.18, node.font_style == 2u);
+        corner.x = corner.x + (h - corner.y) * shear;
+    }
     
     let pos = vec2(base_x + corner.x, base_y + corner.y);
     let ndc_x = (pos.x / uniforms.screen_width) * 2.0 - 1.0;
@@ -363,6 +375,8 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let node = nodes[in.instance_index];
     let pixel_size = 1.0 / node.font_size;
+    let weight_delta = max(0.0, (f32(node.font_weight) - 400.0) / 500.0);
+    let embolden_px = weight_delta * 0.8 * pixel_size;
 
     var total_coverage = 0.0;
     let SAMPLES = 4u;
@@ -371,7 +385,7 @@ fn fs_text(in: VertexOutput) -> @location(0) vec4<f32> {
     for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
         for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {
             let p = in.local_pos + vec2<f32>(f32(sx) + 0.5, f32(sy) + 0.5) * STEP;
-            if (is_inside(p, info)) {
+            if (is_inside(p, info) || (embolden_px > 0.0 && is_inside(p - vec2<f32>(embolden_px, 0.0), info))) {
                 total_coverage += 1.0;
             }
         }

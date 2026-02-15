@@ -98,6 +98,22 @@ justify_content = 41
 # align_items = 42             →  [value:u32]
 # 0=stretch, 1=flex-start, 2=center, 3=flex-end
 align_items = 42
+# text_align = 43             →  [value:u32]
+# 0=left/start, 1=center, 2=right/end
+text_align = 43
+# line_height = 44            →  [value:f32]
+# multiplier against font metrics line height
+line_height = 44
+# letter_spacing = 45         →  [value:f32] [unit:u32]
+letter_spacing = 45
+# word_spacing = 46           →  [value:f32] [unit:u32]
+word_spacing = 46
+# font_weight = 47            →  [value:u32]
+# numeric CSS-like weight (100..900)
+font_weight = 47
+# font_style = 48             →  [value:u32]
+# 0=normal, 1=italic, 2=oblique
+font_style = 48
 
 [controls]
 # CTRL_END terminates a class definition in class_defs buffer

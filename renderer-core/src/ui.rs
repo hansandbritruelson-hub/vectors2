@@ -60,7 +60,11 @@ impl Element {
 
 
     pub fn class(mut self, name: &str) -> Self {
-        self.classes.push(name.to_string());
+        for token in name.split_whitespace() {
+            if !token.is_empty() {
+                self.classes.push(token.to_string());
+            }
+        }
         self
     }
 
@@ -291,4 +295,3 @@ where
 // --- UI Construction ---
 
 // build_ui removed. Logic moved to app crate.
-

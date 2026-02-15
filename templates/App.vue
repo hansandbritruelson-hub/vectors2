@@ -83,9 +83,9 @@
 
 .logo-text {
   font-size: 14px;
-  //font-weight: 700;
+  font-weight: 700;
   color: #fff;
-  //letter-spacing: 0.1em;
+  letter-spacing: 0.1em;
 }
 
 .main-nav {
@@ -98,7 +98,7 @@
   padding: 0 24px;
   justify-content: center;
   font-size: 13px;
-  //font-weight: 500;
+  font-weight: 500;
   color: #888;
   position: relative;
 }
@@ -143,7 +143,7 @@
 
 .status-text {
   font-size: 10px;
-  //font-weight: 700;
+  font-weight: 700;
   color: #2ecc71;
 }
 

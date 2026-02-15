@@ -286,10 +286,10 @@
 
 .panel-title {
   font-size: 11px;
-  //font-weight: 600;
-  /* GPU shader unsupported for now: text-transform: uppercase; */
+  font-weight: 600;
+  text-transform: uppercase;
   color: orange;
-  //letter-spacing: 0.05em;
+  letter-spacing: 0.05em;
   margin-left: 8px;
 }
 

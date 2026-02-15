@@ -432,6 +432,12 @@ pub struct GpuNode {
     pub text_color_b: f32,
     pub text_color_a: f32,
 
+    pub text_align: u32,
+    pub line_height: f32,
+    pub letter_spacing: f32,
+    pub word_spacing: f32,
+    pub font_weight: u32,
+    pub font_style: u32,
     pub font_size: f32,
 
     // --- SVG Styles ---
@@ -439,12 +445,12 @@ pub struct GpuNode {
     pub stroke_color: u32,
     pub stroke_width: f32,
     
-    pub _pad_styles: u32, // Padding to 284 bytes
+    pub _pad_styles: u32, // Padding for alignment
 }
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 284);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 308);
 }
 
 impl GpuNode {
@@ -466,6 +472,12 @@ impl GpuNode {
             text_color_g: 1.0,
             text_color_b: 1.0,
             text_color_a: 1.0,
+            text_align: 0,
+            line_height: 1.0,
+            letter_spacing: 0.0,
+            word_spacing: 0.0,
+            font_weight: 400,
+            font_style: 0,
             top_offset: 0.0,
             left_offset: 0.0,
             z_index: 0.0,
@@ -1013,26 +1025,7 @@ impl FlexEngine {
     }
 
     fn apply_styles(&mut self, node_idx: usize) {
-        let mut resolved: HashMap<String, StyleValue> = HashMap::new();
-
-        // 1. Classes (very basic matching for now)
-        let classes = self.cpu_nodes[node_idx].classes.clone();
-        for class_name in &classes {
-            let dot_selector = format!(".{}", class_name);
-            for rule in &self.stylesheet.rules {
-                if rule.selector == *dot_selector || rule.selector == *class_name {
-                    for (prop, val) in &rule.declarations {
-                        resolved.insert(prop.clone(), val.clone());
-                    }
-                }
-            }
-        }
-
-        // 2. Inline overrides
-        let inline = self.cpu_nodes[node_idx].inline_styles.clone();
-        for (prop, val) in inline {
-            resolved.insert(prop, val);
-        }
+        let resolved = self.resolve_styles_for_node(node_idx);
 
         // Update CpuNode fields based on resolved styles
         for (prop, val) in resolved {
@@ -1043,7 +1036,7 @@ impl FlexEngine {
                 "height" => {
                     if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_height = v; }
                 }
-                "color" | "background-color" => {
+                "background-color" => {
                     if let StyleValue::Color(r, g, b, a) = val { self.cpu_nodes[node_idx].color = (r, g, b, a); }
                 }
                 "flex-direction" => {
@@ -1100,6 +1093,72 @@ impl FlexEngine {
                 }
                 _ => {}
             }
+        }
+    }
+
+    fn resolve_styles_for_node(&self, node_idx: usize) -> HashMap<String, StyleValue> {
+        let mut resolved: HashMap<String, StyleValue> = HashMap::new();
+        let hovered = self.cpu_nodes[node_idx].hovered;
+        let classes = self.cpu_nodes[node_idx].classes.clone();
+        for class_name in &classes {
+            let dot_selector = format!(".{}", class_name);
+            let dot_hover_selector = format!("{}:hover", dot_selector);
+            let plain_hover_selector = format!("{}:hover", class_name);
+            for rule in &self.stylesheet.rules {
+                let selector = rule.selector.as_str();
+                let is_match = selector == dot_selector || selector == class_name;
+                let is_hover_match = hovered && (selector == dot_hover_selector || selector == plain_hover_selector);
+                if is_match || is_hover_match {
+                    for (prop, val) in &rule.declarations {
+                        resolved.insert(prop.clone(), val.clone());
+                    }
+                }
+            }
+        }
+
+        // Inline overrides
+        let inline = self.cpu_nodes[node_idx].inline_styles.clone();
+        for (prop, val) in inline {
+            resolved.insert(prop, val);
+        }
+        resolved
+    }
+
+    fn resolve_text_transform_for_node(&self, node_idx: usize) -> String {
+        let mut idx = Some(node_idx);
+        while let Some(current) = idx {
+            let resolved = self.resolve_styles_for_node(current);
+            if let Some(StyleValue::Ident(mode)) = resolved.get("text-transform") {
+                return mode.clone();
+            }
+            idx = self.cpu_nodes[current].parent;
+        }
+        "none".to_string()
+    }
+
+    fn apply_text_transform(text: &str, transform: &str) -> String {
+        match transform {
+            "uppercase" => text.to_uppercase(),
+            "lowercase" => text.to_lowercase(),
+            "capitalize" => {
+                let mut out = String::with_capacity(text.len());
+                let mut capitalize_next = true;
+                for ch in text.chars() {
+                    if ch.is_whitespace() {
+                        capitalize_next = true;
+                        out.push(ch);
+                    } else if capitalize_next {
+                        for up in ch.to_uppercase() {
+                            out.push(up);
+                        }
+                        capitalize_next = false;
+                    } else {
+                        out.push(ch);
+                    }
+                }
+                out
+            }
+            _ => text.to_string(),
         }
     }
 
@@ -1586,12 +1645,101 @@ impl FlexEngine {
                         dest.push(v.to_bits());
                         dest.push(UNIT_PX);
                     }
+                    StyleValue::Em(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_EM);
+                    }
                     _ => {
                         dest.push(24f32.to_bits());
                         dest.push(UNIT_PX);
                     }
                 }
             }
+            "text-align" => {
+                dest.push(PROP_TEXT_ALIGN);
+                let mode = if let StyleValue::Ident(s) = val {
+                    match s.as_str() {
+                        "center" => 1,
+                        "right" | "end" => 2,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                dest.push(mode);
+            }
+            "line-height" => {
+                dest.push(PROP_LINE_HEIGHT);
+                match val {
+                    // Unitless values are already parsed as Px by this parser; treat as multiplier.
+                    StyleValue::Px(v) | StyleValue::Em(v) => dest.push(v.to_bits()),
+                    _ => dest.push(1.0f32.to_bits()),
+                }
+            }
+            "letter-spacing" => {
+                dest.push(PROP_LETTER_SPACING);
+                match val {
+                    StyleValue::Px(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
+                    }
+                    StyleValue::Em(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_EM);
+                    }
+                    _ => {
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
+                    }
+                }
+            }
+            "word-spacing" => {
+                dest.push(PROP_WORD_SPACING);
+                match val {
+                    StyleValue::Px(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_PX);
+                    }
+                    StyleValue::Em(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_EM);
+                    }
+                    _ => {
+                        dest.push(0f32.to_bits());
+                        dest.push(UNIT_PX);
+                    }
+                }
+            }
+            "font-weight" => {
+                dest.push(PROP_FONT_WEIGHT);
+                let weight = match val {
+                    StyleValue::Px(v) => (*v).round() as u32,
+                    StyleValue::Ident(s) => match s.as_str() {
+                        "normal" => 400,
+                        "bold" => 700,
+                        "bolder" => 800,
+                        "lighter" => 300,
+                        _ => 400,
+                    },
+                    _ => 400,
+                };
+                dest.push(weight.clamp(100, 900));
+            }
+            "font-style" => {
+                dest.push(PROP_FONT_STYLE);
+                let style = if let StyleValue::Ident(s) = val {
+                    match s.as_str() {
+                        "italic" => 1,
+                        "oblique" => 2,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                dest.push(style);
+            }
+            // Applied on CPU while generating per-character glyphs.
+            "text-transform" => {}
             "fill" => {
                 dest.push(PROP_FILL_COLOR);
                 if let StyleValue::Color(r, g, b, a) = val {
@@ -1904,6 +2052,12 @@ impl FlexEngine {
             let cn_text = self.cpu_nodes[cpu_idx].text.clone();
             let cn_shape_data = self.cpu_nodes[cpu_idx].shape_data.clone();
             let cn_font_size = self.cpu_nodes[cpu_idx].font_size;
+            let transformed_text = if let Some(text_content) = &cn_text {
+                let text_transform = self.resolve_text_transform_for_node(cpu_idx);
+                Some(Self::apply_text_transform(text_content, text_transform.as_str()))
+            } else {
+                None
+            };
             
             // Calculate Children Range
             let start_child_gpu_idx = self.gpu_nodes.len() as u32;
@@ -1967,7 +2121,7 @@ impl FlexEngine {
                 }
                 
                 // Text Handling (Rebuild Characters)
-                if let Some(text_content) = &cn_text {
+                if let Some(text_content) = transformed_text.as_ref() {
                      let chars_start = self.characters.len() as u32;
                      let chars_vec: Vec<char> = text_content.chars().collect();
                      let chars_len = chars_vec.len() as u32;

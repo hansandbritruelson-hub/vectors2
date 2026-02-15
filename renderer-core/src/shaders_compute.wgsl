@@ -86,6 +86,12 @@ struct Node {
     text_color_b: f32,
     text_color_a: f32,
 
+    text_align: u32,
+    line_height: f32,
+    letter_spacing: f32,
+    word_spacing: f32,
+    font_weight: u32,
+    font_style: u32,
     font_size: f32,
 
     fill_color: u32,
@@ -164,10 +170,29 @@ struct LayoutResult {
     height: f32,
 };
 
+fn line_shift(align: u32, line_width: f32, content_width: f32) -> f32 {
+    let slack = max(0.0, content_width - line_width);
+    if (align == 1u) {
+        return slack * 0.5;
+    }
+    if (align == 2u) {
+        return slack;
+    }
+    return 0.0;
+}
+
+fn apply_line_alignment(start_idx: u32, end_idx: u32, shift: f32) {
+    if (shift == 0.0 || end_idx <= start_idx) {
+        return;
+    }
+    for (var i = start_idx; i < end_idx; i = i + 1u) {
+        characters[i].x = characters[i].x + shift;
+    }
+}
+
 fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult {
     let start = nodes[node_id].text_start;
     let len = nodes[node_id].text_length;
-    let line_height = uniforms.line_height;
     let font_ascender = uniforms.font_ascender;
     
     var cursor_x = 0.0;
@@ -176,7 +201,13 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
     
     let font_size = nodes[node_id].font_size;
     let scale = font_size;
-    
+    let line_height = uniforms.line_height * max(0.1, nodes[node_id].line_height);
+    let letter_spacing = nodes[node_id].letter_spacing;
+    let word_spacing = nodes[node_id].word_spacing;
+    let text_align = nodes[node_id].text_align;
+    let available_width = max(0.0, max_width);
+    var line_start = start;
+
     // Safety check for empty text
     if (len == 0u) {
         return LayoutResult(0.0, 0.0);
@@ -188,12 +219,22 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
         let glyph_idx = char.glyph_index; 
         
         let glyph = glyph_data[glyph_idx];
-        let advance = glyph.advance;
+        let is_space = char.value == 32u;
+        var extra_spacing = letter_spacing;
+        if (is_space) {
+            extra_spacing = extra_spacing + word_spacing;
+        }
+        let advance = glyph.advance * scale + extra_spacing;
         
         // Word wrap check
-        if (cursor_x + advance * scale > max_width + 0.01 && cursor_x > 0.0) {
+        if (cursor_x + advance > available_width + 0.01 && cursor_x > 0.0) {
+            if (write_output) {
+                let shift = line_shift(text_align, cursor_x, available_width);
+                apply_line_alignment(line_start, idx, shift);
+            }
             cursor_x = 0.0;
             cursor_y += line_height * scale;
+            line_start = idx;
         }
         
         if (write_output) {
@@ -203,9 +244,15 @@ fn layout_text(node_id: u32, max_width: f32, write_output: bool) -> LayoutResult
             characters[idx].height = glyph.height * scale;
         }
         
-        cursor_x += advance * scale;
+        cursor_x += advance;
         
         max_x = max(max_x, cursor_x);
+    }
+
+    if (write_output) {
+        let end = start + len;
+        let shift = line_shift(text_align, cursor_x, available_width);
+        apply_line_alignment(line_start, end, shift);
     }
     
     return LayoutResult(max_x, cursor_y + line_height * scale);
@@ -908,8 +955,49 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
                     if (unit == UNIT_PX) { nodes[id].font_size = val; }
+                    else if (unit == UNIT_EM) { nodes[id].font_size = val * nodes[id].font_size; }
                 }
                 pos = pos + 2u;
+                break;
+            }
+            case PROP_TEXT_ALIGN: {
+                if (apply) { nodes[id].text_align = get_style_val(buffer_selector, pos); }
+                pos = pos + 1u;
+                break;
+            }
+            case PROP_LINE_HEIGHT: {
+                if (apply) { nodes[id].line_height = max(0.1, bitcast<f32>(get_style_val(buffer_selector, pos))); }
+                pos = pos + 1u;
+                break;
+            }
+            case PROP_LETTER_SPACING: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].letter_spacing = val; }
+                    else if (unit == UNIT_EM) { nodes[id].letter_spacing = val * nodes[id].font_size; }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_WORD_SPACING: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    if (unit == UNIT_PX) { nodes[id].word_spacing = val; }
+                    else if (unit == UNIT_EM) { nodes[id].word_spacing = val * nodes[id].font_size; }
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_FONT_WEIGHT: {
+                if (apply) { nodes[id].font_weight = get_style_val(buffer_selector, pos); }
+                pos = pos + 1u;
+                break;
+            }
+            case PROP_FONT_STYLE: {
+                if (apply) { nodes[id].font_style = get_style_val(buffer_selector, pos); }
+                pos = pos + 1u;
                 break;
             }
             case PROP_FILL_COLOR: {
@@ -997,6 +1085,12 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     nodes[id].text_color_g = 1.0;
     nodes[id].text_color_b = 1.0;
     nodes[id].text_color_a = 1.0;
+    nodes[id].text_align = 0u;
+    nodes[id].line_height = 1.0;
+    nodes[id].letter_spacing = 0.0;
+    nodes[id].word_spacing = 0.0;
+    nodes[id].font_weight = 400u;
+    nodes[id].font_style = 0u;
     nodes[id].font_size = 24.0;
     nodes[id].fill_color = 0u;
     nodes[id].stroke_color = 0u;
@@ -1051,6 +1145,24 @@ fn inherit_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
             nodes[id].text_color_g = nodes[parent_id].text_color_g;
             nodes[id].text_color_b = nodes[parent_id].text_color_b;
             nodes[id].text_color_a = nodes[parent_id].text_color_a;
+        }
+        if (nodes[id].text_align == 0u) {
+            nodes[id].text_align = nodes[parent_id].text_align;
+        }
+        if (nodes[id].line_height == 1.0) {
+            nodes[id].line_height = nodes[parent_id].line_height;
+        }
+        if (nodes[id].letter_spacing == 0.0) {
+            nodes[id].letter_spacing = nodes[parent_id].letter_spacing;
+        }
+        if (nodes[id].word_spacing == 0.0) {
+            nodes[id].word_spacing = nodes[parent_id].word_spacing;
+        }
+        if (nodes[id].font_weight == 400u) {
+            nodes[id].font_weight = nodes[parent_id].font_weight;
+        }
+        if (nodes[id].font_style == 0u) {
+            nodes[id].font_style = nodes[parent_id].font_style;
         }
 
         atomicStore(&nodes[id].signals_finished, 1u);
