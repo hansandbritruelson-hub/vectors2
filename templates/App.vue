@@ -9,21 +9,21 @@
         <div 
           class="nav-tab" 
           :class="view == 'image' ? 'active' : ''"
-          @click="set_view.set('image')"
+          @click="set_view.set(\"image\")"
         >
           Vector Editor
         </div>
         <div 
           class="nav-tab" 
           :class="view == 'video' ? 'active' : ''"
-          @click="set_view.set('video')"
+          @click="set_view.set(\"video\")"
         >
           Video Editor
         </div>
         <div
           class="nav-tab"
           :class="view == 'css-demo' ? 'active' : ''"
-          @click="set_view.set('css-demo')"
+          @click="set_view.set(\"css-demo\")"
         >
           CSS Demo
         </div>

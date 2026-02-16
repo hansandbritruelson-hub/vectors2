@@ -1,11 +1,11 @@
-use crate::parser::{Template, Node, Element};
 use crate::css::{self, StyleValue};
+use crate::parser::{Attribute, Element, Node, Template};
 use proc_macro2::TokenStream;
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
 
 pub fn generate_rust(template: &Template) -> String {
     let mut id_gen = 0;
-    
+
     // Parse CSS
     let mut all_rules = Vec::new();
     for style_content in &template.styles {
@@ -46,8 +46,9 @@ pub fn generate_rust(template: &Template) -> String {
     // Check for Props using syn (robust)
     let script = template.script.as_deref().unwrap_or("");
     let wrapped_script = format!("{{ {} }}", script);
-    let script_block = syn::parse_str::<syn::Block>(&wrapped_script).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
-    
+    let script_block = syn::parse_str::<syn::Block>(&wrapped_script)
+        .unwrap_or_else(|_| syn::parse_str("{}").unwrap());
+
     let mut module_items = Vec::new();
     let mut function_stmts = Vec::new();
 
@@ -67,7 +68,7 @@ pub fn generate_rust(template: &Template) -> String {
             }
         }
     }
-    
+
     let props_def = if !has_props_struct {
         quote! {
             #[allow(dead_code)]
@@ -75,7 +76,7 @@ pub fn generate_rust(template: &Template) -> String {
             pub struct Props { }
         }
     } else {
-        quote! { }
+        quote! {}
     };
 
     // Build signature
@@ -98,7 +99,7 @@ pub fn generate_rust(template: &Template) -> String {
             }
         }
     }
-    
+
     let expanded = quote! {
         #![allow(unused_imports)]
         #![allow(non_snake_case)]
@@ -149,6 +150,9 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
     match node {
         Node::Element(el) => generate_element_code(el, parent_name, id_gen),
         Node::Text(t) => {
+            let Some(text_value) = normalize_text_content(t) else {
+                return quote! {};
+            };
             let parent_token = if let Some(p) = parent_name {
                 let p_ident = format_ident!("{}", p);
                 quote! { Some(#p_ident) }
@@ -156,11 +160,12 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
                 quote! { None }
             };
             quote! {
-                text(#t).build(engine.clone(), #parent_token);
+                div().text(#text_value).build(engine.clone(), #parent_token);
             }
-        },
+        }
         Node::Binding(b) => {
-            let expr: syn::Expr = syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+            let expr: syn::Expr =
+                syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
             let parent_token = if let Some(p) = parent_name {
                 let p_ident = format_ident!("{}", p);
                 quote! { Some(#p_ident) }
@@ -168,10 +173,10 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
                 quote! { None }
             };
             quote! {
-                div().child(text("").value(create_memo({
+                div().value(create_memo({
                     let val = #expr.clone();
                     move || val.to_reactive_string()
-                }))).build(engine.clone(), #parent_token);
+                })).build(engine.clone(), #parent_token);
             }
         }
     }
@@ -179,28 +184,34 @@ fn generate_node(node: &Node, parent_name: Option<&str>, id_gen: &mut u32) -> To
 
 fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
     *id_gen += 1;
-    
+
     // Check for Component (PascalCase)
-    let is_component = el.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+    let is_component = el
+        .name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false);
 
     if is_component {
         let component_name = format_ident!("{}", el.name);
         let mut field_assignments = Vec::new();
         for attr in &el.attributes {
             let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
-             if attr.is_dynamic {
-                 let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
-                 field_assignments.push(quote! { #field_name: #expr });
-             } else {
-                 let val = &attr.value;
-                 field_assignments.push(quote! { #field_name: #val.to_string() });
-             }
+            if attr.is_dynamic {
+                let expr: syn::Expr =
+                    syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
+                field_assignments.push(quote! { #field_name: #expr });
+            } else {
+                let val = &attr.value;
+                field_assignments.push(quote! { #field_name: #val.to_string() });
+            }
         }
 
         return quote! {
             self::#component_name::build(
-                engine.clone(), 
-                None, 
+                engine.clone(),
+                None,
                 self::#component_name::Props {
                     #(#field_assignments),*
                 }
@@ -217,71 +228,7 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
         _ => quote! { div() },
     };
 
-    for attr in &el.attributes {
-        if attr.name == "v-for" || attr.name == "v-if" { continue; }
-        
-        match attr.name.as_str() {
-            "class" => {
-                let val = &attr.value;
-                builder = quote! { #builder.class(#val) };
-            }
-            "style" => {
-                let inline_style = format!("temp {{ {} }}", attr.value);
-                if let Ok((_, rules)) = css::parse_css(&inline_style) {
-                    if let Some(rule) = rules.first() {
-                        for (prop, val) in &rule.declarations {
-                            let val_tokens = style_value_to_tokens(val);
-                            builder = quote! { #builder.style(#prop, #val_tokens) };
-                        }
-                    }
-                }
-            }
-            "image" | "src" => {
-                let val = &attr.value;
-                builder = quote! { #builder.image(#val) };
-            }
-            "data" | "d" => {
-                let val = &attr.value;
-                builder = quote! { #builder.path(#val) };
-            }
-            "type" => {
-                let val = &attr.value;
-                builder = quote! { #builder.input_type(#val) };
-            }
-            "@update:modelValue" => {
-                let raw_val = attr.value.replace("=>", "|val|");
-                let val = if (raw_val.contains('|') || raw_val.contains('{')) && !raw_val.trim().starts_with("move") {
-                    format!("move {}", raw_val)
-                } else {
-                    raw_val
-                };
-                let expr: syn::Expr = syn::parse_str(&val).unwrap_or_else(|_| syn::parse_str("move |val| {}").unwrap());
-                if val.contains('|') {
-                    builder = quote! { #builder.on_update_model_value(#expr) };
-                } else {
-                    builder = quote! { #builder.on_update_model_value(move |val| { #expr(val) }) };
-                }
-            }
-            "@click" => {
-                let sanitized_value = attr.value.replace('\'', "\"");
-                let expr: syn::Expr = syn::parse_str(&sanitized_value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
-                builder = quote! { #builder.on_click(move || { #expr }) };
-            }
-            "text" | ":text" | "value" | ":value" => {
-                if attr.is_dynamic || attr.name.starts_with(':') {
-                    let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                    builder = quote! { #builder.value(create_memo({
-                        let val = #expr.clone();
-                        move || val.to_reactive_string()
-                    })) };
-                } else {
-                    let val = &attr.value;
-                    builder = quote! { #builder.text(#val) };
-                }
-            }
-            _ => {}
-        }
-    }
+    builder = apply_attributes(builder, &el.attributes);
 
     for child in &el.children {
         match child {
@@ -290,11 +237,14 @@ fn generate_element_builder(el: &Element, id_gen: &mut u32) -> TokenStream {
                 builder = quote! { #builder.child(#child_builder) };
             }
             Node::Text(t) => {
-                builder = quote! { #builder.child(text(#t)) };
+                if let Some(text_value) = normalize_text_content(t) {
+                    builder = quote! { #builder.child(div().text(#text_value)) };
+                }
             }
             Node::Binding(b) => {
-                let expr: syn::Expr = syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                builder = quote! { #builder.child(text("").value(create_memo({
+                let expr: syn::Expr =
+                    syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+                builder = quote! { #builder.child(div().value(create_memo({
                     let val = #expr.clone();
                     move || val.to_reactive_string()
                 }))) };
@@ -319,11 +269,12 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
 
     if let Some(condition) = v_if {
         let sanitized_condition = condition.replace('\'', "\"");
-        let condition_expr: syn::Expr = syn::parse_str(&sanitized_condition).unwrap_or_else(|_| syn::parse_str("true").unwrap());
-        
+        let condition_expr: syn::Expr = syn::parse_str(&sanitized_condition)
+            .unwrap_or_else(|_| syn::parse_str("true").unwrap());
+
         let mut inner_el = el.clone();
         inner_el.attributes.retain(|a| a.name != "v-if");
-        
+
         let parent_token = if let Some(p) = parent_name {
             let p_ident = format_ident!("{}", p);
             quote! { #p_ident }
@@ -342,7 +293,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                     let engine = engine_c.clone();
                     #inner_code
                 });
-                0 
+                0
             }
         };
     }
@@ -358,7 +309,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             let p_ident = format_ident!("{}", p);
             quote! { #p_ident }
         } else {
-            quote! { 0 } 
+            quote! { 0 }
         };
 
         let builder = generate_element_builder(el, id_gen);
@@ -368,39 +319,47 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 mount_list(engine.clone(), #parent_token, #collection_ident, |item| item.id.clone(), move |#item_ident| {
                     #builder
                 });
-                0 
+                0
             }
         };
     }
 
     // PascalCase Components
-    let is_component = el.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+    let is_component = el
+        .name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false);
 
     if is_component {
         let component_name = format_ident!("{}", el.name);
-         let parent_token = if let Some(p) = parent_name {
+        let parent_token = if let Some(p) = parent_name {
             let p_ident = format_ident!("{}", p);
             quote! { Some(#p_ident) }
         } else {
-            quote! { None } 
+            quote! { None }
         };
-        
+
         let mut field_assignments = Vec::new();
         for attr in &el.attributes {
-            if attr.name == "v-if" || attr.name == "v-for" { continue; }
+            if attr.name == "v-if" || attr.name == "v-for" {
+                continue;
+            }
             let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
-             if attr.is_dynamic {
-                 let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
-                 field_assignments.push(quote! { #field_name: #expr });
-             } else {
-                 let val = &attr.value;
-                 field_assignments.push(quote! { #field_name: #val.to_string() });
-             }
+            if attr.is_dynamic {
+                let expr: syn::Expr =
+                    syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("()").unwrap());
+                field_assignments.push(quote! { #field_name: #expr });
+            } else {
+                let val = &attr.value;
+                field_assignments.push(quote! { #field_name: #val.to_string() });
+            }
         }
 
         return quote! {
              self::#component_name::build(
-                engine.clone(), 
+                engine.clone(),
                 #parent_token,
                 self::#component_name::Props {
                     #(#field_assignments),*
@@ -415,9 +374,9 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         let p_ident = format_ident!("{}", p);
         quote! { Some(#p_ident) }
     } else {
-        quote! { parent } 
+        quote! { parent }
     };
-    
+
     let mut builder = match el.name.as_str() {
         "div" => quote! { div() },
         "text" => quote! { text("") },
@@ -427,9 +386,32 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         _ => quote! { div() },
     };
 
-    for attr in &el.attributes {
-        if attr.name == "v-if" || attr.name == "v-for" { continue; }
-        
+    builder = apply_attributes(builder, &el.attributes);
+
+    let child_codes: Vec<TokenStream> = el
+        .children
+        .iter()
+        .map(|c| {
+            let code = generate_node(c, Some(&node_var.to_string()), id_gen);
+            quote! { #code; }
+        })
+        .collect();
+
+    quote! {
+        let #node_var = #builder.build(engine.clone(), #parent_token);
+        {
+            #(#child_codes)*
+        }
+        #node_var
+    }
+}
+
+fn apply_attributes(mut builder: TokenStream, attributes: &[Attribute]) -> TokenStream {
+    for attr in attributes {
+        if attr.name == "v-for" || attr.name == "v-if" {
+            continue;
+        }
+
         match attr.name.as_str() {
             "class" => {
                 let val = &attr.value;
@@ -460,12 +442,15 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             }
             "@update:modelValue" => {
                 let raw_val = attr.value.replace("=>", "|val|");
-                let val = if (raw_val.contains('|') || raw_val.contains('{')) && !raw_val.trim().starts_with("move") {
+                let val = if (raw_val.contains('|') || raw_val.contains('{'))
+                    && !raw_val.trim().starts_with("move")
+                {
                     format!("move {}", raw_val)
                 } else {
                     raw_val
                 };
-                let expr: syn::Expr = syn::parse_str(&val).unwrap_or_else(|_| syn::parse_str("move |val| {}").unwrap());
+                let expr: syn::Expr = syn::parse_str(&val)
+                    .unwrap_or_else(|_| syn::parse_str("move |val| {}").unwrap());
                 if val.contains('|') {
                     builder = quote! { #builder.on_update_model_value(#expr) };
                 } else {
@@ -473,57 +458,89 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                 }
             }
             "@click" => {
-                let sanitized_value = attr.value.replace('\'', "\"");
-                let expr: syn::Expr = syn::parse_str(&sanitized_value).unwrap_or_else(|_| syn::parse_str("{}").unwrap());
-                builder = quote! { #builder.on_click(move || { #expr }) };
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_click(#handler) };
+            }
+            "@mouseenter" => {
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_mouse_enter(#handler) };
+            }
+            "@mouseleave" => {
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_mouse_leave(#handler) };
             }
             "text" | ":text" | "value" | ":value" => {
                 if attr.is_dynamic || attr.name.starts_with(':') {
-                    let expr: syn::Expr = syn::parse_str(&attr.value).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
+                    let expr: syn::Expr = syn::parse_str(&attr.value)
+                        .unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
                     builder = quote! { #builder.value(create_memo({
                         let val = #expr.clone();
                         move || val.to_reactive_string()
                     })) };
-                } else {
-                    let val = &attr.value;
-                    builder = quote! { #builder.text(#val) };
+                } else if let Some(text_value) = normalize_text_content(&attr.value) {
+                    builder = quote! { #builder.text(#text_value) };
                 }
             }
             _ => {}
         }
     }
 
-    let mut current_el = el.clone();
+    builder
+}
 
-    if el.children.len() == 1 {
-        match &el.children[0] {
-            Node::Text(t) => {
-                builder = quote! { #builder.text(#t) };
-                current_el.children = Vec::new();
+fn parse_event_handler(raw: &str) -> TokenStream {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        panic!("Event handler cannot be empty");
+    }
+
+    if let Ok(closure) = syn::parse_str::<syn::ExprClosure>(trimmed) {
+        return quote! { #closure };
+    }
+
+    if let Ok(block) = syn::parse_str::<syn::Block>(trimmed) {
+        return quote! { move |event: renderer_core::UiEvent| #block };
+    }
+
+    if let Ok(expr) = syn::parse_str::<syn::Expr>(trimmed) {
+        return match expr {
+            syn::Expr::Path(_) => quote! {
+                move |event: renderer_core::UiEvent| {
+                    (#expr)(event);
+                }
+            },
+            _ => quote! {
+                move |event: renderer_core::UiEvent| {
+                    #expr;
+                }
+            },
+        };
+    }
+
+    panic!("Invalid event handler syntax: {}", raw)
+}
+
+fn normalize_text_content(raw: &str) -> Option<String> {
+    let mut normalized = String::new();
+    let mut in_whitespace = false;
+
+    for ch in raw.chars() {
+        if ch.is_whitespace() {
+            if !in_whitespace {
+                normalized.push(' ');
+                in_whitespace = true;
             }
-            Node::Binding(b) => {
-                let expr: syn::Expr = syn::parse_str(b).unwrap_or_else(|_| syn::parse_str("\"error\"").unwrap());
-                builder = quote! { #builder.value(create_memo({
-                    let val = #expr.clone();
-                    move || val.to_reactive_string()
-                })) };
-                current_el.children = Vec::new();
-            }
-            _ => {}
+        } else {
+            normalized.push(ch);
+            in_whitespace = false;
         }
     }
 
-    let child_codes: Vec<TokenStream> = current_el.children.iter().map(|c| {
-        let code = generate_node(c, Some(&node_var.to_string()), id_gen);
-        quote! { #code; }
-    }).collect();
-
-    quote! {
-        let #node_var = #builder.build(engine.clone(), #parent_token);
-        {
-            #(#child_codes)*
-        }
-        #node_var
+    let trimmed = normalized.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
     }
 }
 
@@ -534,7 +551,9 @@ fn style_value_to_tokens(val: &StyleValue) -> TokenStream {
         StyleValue::Em(v) => quote! { renderer_core::StyleValue::Em(#v) },
         StyleValue::Vh(v) => quote! { renderer_core::StyleValue::Vh(#v) },
         StyleValue::Vw(v) => quote! { renderer_core::StyleValue::Vw(#v) },
-        StyleValue::Color(r, g, b, a) => quote! { renderer_core::StyleValue::Color(#r, #g, #b, #a) },
+        StyleValue::Color(r, g, b, a) => {
+            quote! { renderer_core::StyleValue::Color(#r, #g, #b, #a) }
+        }
         StyleValue::Ident(s) => quote! { renderer_core::StyleValue::Ident(#s.to_string()) },
         StyleValue::String(s) => quote! { renderer_core::StyleValue::String(#s.to_string()) },
         StyleValue::Auto => quote! { renderer_core::StyleValue::Auto },

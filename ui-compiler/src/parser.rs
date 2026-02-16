@@ -1,10 +1,10 @@
 use nom::{
+    IResult,
     bytes::complete::{tag, take_until, take_while, take_while1},
     character::complete::{multispace0, multispace1},
     combinator::{map, opt, recognize},
     multi::many0,
-    sequence::{delimited, pair, preceded, tuple},
-    IResult,
+    sequence::{delimited, pair, preceded},
 };
 
 #[derive(Debug, Clone)]
@@ -48,7 +48,15 @@ fn identifier(input: &str) -> IResult<&str, String> {
             // First character can be alphanumeric, or one of ':', '@', '#', '_'
             take_while1(|c: char| c.is_alphanumeric() || c == ':' || c == '@' || c == '#'),
             // Subsequent characters can be alphanumeric, or one of '-', '_', ':', '.', '@', '#'
-            take_while(|c: char| c.is_alphanumeric() || c == '-' || c == '_' || c == ':' || c == '.' || c == '@' || c == '#'),
+            take_while(|c: char| {
+                c.is_alphanumeric()
+                    || c == '-'
+                    || c == '_'
+                    || c == ':'
+                    || c == '.'
+                    || c == '@'
+                    || c == '#'
+            }),
         )),
         |s: &str| s.to_string(),
     )(input)
@@ -56,21 +64,63 @@ fn identifier(input: &str) -> IResult<&str, String> {
 
 fn attribute(input: &str) -> IResult<&str, Attribute> {
     let (input, name) = identifier(input)?;
-    let (input, value_opt) = opt(tuple((
-        tag("="),
-        delimited(tag("\""), take_until("\""), tag("\"")),
-    )))(input)?;
+    let (input, value_opt) = opt(preceded(tag("="), quoted_attribute_value))(input)?;
 
     let is_dynamic = name.starts_with(':') || name.starts_with('@');
     let clean_name = &name;
 
-    let value = value_opt.map(|(_, v)| v.to_string()).unwrap_or_else(|| "true".to_string());
+    let value = value_opt.unwrap_or_else(|| "true".to_string());
 
-    Ok((input, Attribute {
-        name: clean_name.to_string(),
-        value,
-        is_dynamic,
-    }))
+    Ok((
+        input,
+        Attribute {
+            name: clean_name.to_string(),
+            value,
+            is_dynamic,
+        },
+    ))
+}
+
+fn quoted_attribute_value(input: &str) -> IResult<&str, String> {
+    if !input.starts_with('"') {
+        return Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::Char,
+        )));
+    }
+
+    let mut out = String::new();
+    let mut escaped = false;
+
+    for (idx, ch) in input[1..].char_indices() {
+        if escaped {
+            let decoded = match ch {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '"' => '"',
+                '\\' => '\\',
+                other => other,
+            };
+            out.push(decoded);
+            escaped = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => escaped = true,
+            '"' => {
+                let rest = &input[(idx + 2)..];
+                return Ok((rest, out));
+            }
+            other => out.push(other),
+        }
+    }
+
+    Err(nom::Err::Error(nom::error::Error::new(
+        input,
+        nom::error::ErrorKind::Escaped,
+    )))
 }
 
 fn open_tag(input: &str) -> IResult<&str, (String, Vec<Attribute>, bool)> {
@@ -104,37 +154,49 @@ fn binding_node(input: &str) -> IResult<&str, Node> {
 
 fn element_node(input: &str) -> IResult<&str, Node> {
     let (input, (name, attributes, self_closing)) = open_tag(input)?;
-    
+
     if self_closing {
-        return Ok((input, Node::Element(Element {
-            name,
-            attributes,
-            children: vec![],
-        })));
+        return Ok((
+            input,
+            Node::Element(Element {
+                name,
+                attributes,
+                children: vec![],
+            }),
+        ));
     }
 
     let (input, children) = many0(node)(input)?;
     let (input, _) = multispace0(input)?;
     let (input, _close_name) = close_tag(input)?;
-    
-    Ok((input, Node::Element(Element {
-        name,
-        attributes,
-        children,
-    })))
+
+    Ok((
+        input,
+        Node::Element(Element {
+            name,
+            attributes,
+            children,
+        }),
+    ))
 }
 
 fn node(input: &str) -> IResult<&str, Node> {
     let (next_input, _) = multispace0(input)?;
     if next_input.is_empty() {
-        return Err(nom::Err::Error(nom::error::Error::new(next_input, nom::error::ErrorKind::Eof)));
+        return Err(nom::Err::Error(nom::error::Error::new(
+            next_input,
+            nom::error::ErrorKind::Eof,
+        )));
     }
-    
+
     if next_input.starts_with("{{") {
         binding_node(next_input)
     } else if next_input.starts_with('<') {
         if next_input.starts_with("</") {
-            return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+            return Err(nom::Err::Error(nom::error::Error::new(
+                input,
+                nom::error::ErrorKind::Tag,
+            )));
         }
         element_node(next_input)
     } else {
@@ -153,7 +215,9 @@ pub fn parse_template(input: &str) -> IResult<&str, Template> {
     let mut remaining = input;
     while !remaining.is_empty() {
         let (next_raw, _) = multispace0(remaining)?;
-        if next_raw.is_empty() { break; }
+        if next_raw.is_empty() {
+            break;
+        }
 
         if next_raw.starts_with("<script") {
             let (next, _) = tag("<script")(next_raw)?;
@@ -191,7 +255,7 @@ pub fn parse_template(input: &str) -> IResult<&str, Template> {
             remaining = next;
         }
     }
-    
+
     Ok((remaining, template))
 }
 
@@ -200,13 +264,13 @@ fn extract_imports(script: &str) -> (String, Vec<Import>) {
     // Since the script block content is injected into a function, it may contain statements (let x = 1;)
     // and items (mod Header;). syn::parse_file only accepts items.
     // So we wrap it in braces to parse as a Block.
-    
+
     let wrapped_script = format!("{{ {} }}", script);
     let block = match syn::parse_str::<syn::Block>(&wrapped_script) {
         Ok(b) => b,
         Err(e) => {
-             eprintln!("Warning: Failed to parse script block with syn: {}", e);
-             return (script.to_string(), vec![]);
+            eprintln!("Warning: Failed to parse script block with syn: {}", e);
+            return (script.to_string(), vec![]);
         }
     };
 
@@ -216,14 +280,19 @@ fn extract_imports(script: &str) -> (String, Vec<Import>) {
     for stmt in block.stmts {
         let mut is_component_mod = false;
         if let syn::Stmt::Item(syn::Item::Mod(ref item_mod)) = stmt {
-             let mod_name = item_mod.ident.to_string();
-             if mod_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
-                 imports.push(Import {
-                     module_name: mod_name,
-                     is_component: true,
-                 });
-                 is_component_mod = true;
-             }
+            let mod_name = item_mod.ident.to_string();
+            if mod_name
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+            {
+                imports.push(Import {
+                    module_name: mod_name,
+                    is_component: true,
+                });
+                is_component_mod = true;
+            }
         }
 
         if !is_component_mod {
@@ -236,6 +305,6 @@ fn extract_imports(script: &str) -> (String, Vec<Import>) {
     let new_block_content = quote::quote! {
         #(#new_stmts)*
     };
-    
+
     (new_block_content.to_string(), imports)
 }

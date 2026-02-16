@@ -1,12 +1,12 @@
-use wasm_bindgen::prelude::*;
-use ttf_parser::{Face, GlyphId, OutlineBuilder};
 use std::collections::HashMap;
+use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use wasm_bindgen::prelude::*;
 
 pub mod renderer;
-pub mod ui;
-pub mod web_bindings;
 pub mod signals;
 pub mod texture_atlas;
+pub mod ui;
+pub mod web_bindings;
 // REMOVED: pub mod generated_ui;
 mod style_constants {
     include!(concat!(env!("OUT_DIR"), "/style_constants.rs"));
@@ -27,6 +27,30 @@ pub fn log(s: &str) {
 // REMOVED: include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
 
 const FONT_DATA: &[u8] = include_bytes!("../roboto.ttf");
+
+pub(crate) const NODE_FLAG_VISIBLE: u32 = 1 << 0;
+pub(crate) const NODE_FLAG_HAS_IMAGE: u32 = 1 << 1;
+pub(crate) const NODE_FLAG_IS_SHAPE: u32 = 1 << 2;
+pub(crate) const NODE_FLAG_IS_INPUT: u32 = 1 << 3;
+pub(crate) const NODE_FLAG_HOVERED: u32 = 1 << 4;
+pub(crate) const NODE_FLAG_HAS_MOUSE_ENTER_LISTENER: u32 = 1 << 5;
+pub(crate) const NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER: u32 = 1 << 6;
+
+#[derive(Clone, Debug)]
+pub struct UiEventTarget {
+    pub id: u32,
+    pub inner_text: String,
+    pub classes: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct UiEvent {
+    pub event_type: String,
+    pub target: UiEventTarget,
+    pub current_target: UiEventTarget,
+    pub mouse_x: f32,
+    pub mouse_y: f32,
+}
 
 #[derive(Clone, Debug)]
 pub enum StyleValue {
@@ -55,10 +79,14 @@ pub struct StyleSheet {
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct GpuCurve {
-    pub p0_x: f32, pub p0_y: f32,
-    pub p1_x: f32, pub p1_y: f32,
-    pub p2_x: f32, pub p2_y: f32,
-    pub p3_x: f32, pub p3_y: f32,
+    pub p0_x: f32,
+    pub p0_y: f32,
+    pub p1_x: f32,
+    pub p1_y: f32,
+    pub p2_x: f32,
+    pub p2_y: f32,
+    pub p3_x: f32,
+    pub p3_y: f32,
 }
 
 #[repr(C)]
@@ -96,18 +124,34 @@ impl PathCollector {
     }
 
     // For font parsing (y-up, variable scale)
-    fn tx_font(&self, x: f32) -> f32 { (x - self.x_min) * self.scale }
-    fn ty_font(&self, y: f32) -> f32 { (self.y_max - y) * self.scale }
+    fn tx_font(&self, x: f32) -> f32 {
+        (x - self.x_min) * self.scale
+    }
+    fn ty_font(&self, y: f32) -> f32 {
+        (self.y_max - y) * self.scale
+    }
 
     // For shape parsing (y-down, 1:1 scale usually)
-    fn tx_shape(&self, x: f32) -> f32 { x }
-    fn ty_shape(&self, y: f32) -> f32 { y }
-    
+    fn tx_shape(&self, x: f32) -> f32 {
+        x
+    }
+    fn ty_shape(&self, y: f32) -> f32 {
+        y
+    }
+
     fn add_line(&mut self, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
-        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
+        let p3_x = if is_font {
+            self.tx_font(x)
+        } else {
+            self.tx_shape(x)
+        };
+        let p3_y = if is_font {
+            self.ty_font(y)
+        } else {
+            self.ty_shape(y)
+        };
 
         // Represent line as cubic
         let p1_x = p0_x + (p3_x - p0_x) / 3.0;
@@ -116,34 +160,58 @@ impl PathCollector {
         let p2_y = p0_y + 2.0 * (p3_y - p0_y) / 3.0;
 
         self.curves.push(GpuCurve {
-            p0_x, p0_y,
-            p1_x, p1_y,
-            p2_x, p2_y,
-            p3_x, p3_y,
+            p0_x,
+            p0_y,
+            p1_x,
+            p1_y,
+            p2_x,
+            p2_y,
+            p3_x,
+            p3_y,
         });
         self.current_x = p3_x;
         self.current_y = p3_y;
     }
-    
+
     fn add_quad(&mut self, x1: f32, y1: f32, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let cp_x = if is_font { self.tx_font(x1) } else { self.tx_shape(x1) };
-        let cp_y = if is_font { self.ty_font(y1) } else { self.ty_shape(y1) };
-        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
-        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
+        let cp_x = if is_font {
+            self.tx_font(x1)
+        } else {
+            self.tx_shape(x1)
+        };
+        let cp_y = if is_font {
+            self.ty_font(y1)
+        } else {
+            self.ty_shape(y1)
+        };
+        let p3_x = if is_font {
+            self.tx_font(x)
+        } else {
+            self.tx_shape(x)
+        };
+        let p3_y = if is_font {
+            self.ty_font(y)
+        } else {
+            self.ty_shape(y)
+        };
 
         // Represent quadratic as cubic
         let p1_x = p0_x + 2.0 * (cp_x - p0_x) / 3.0;
         let p1_y = p0_y + 2.0 * (cp_y - p0_y) / 3.0;
         let p2_x = p3_x + 2.0 * (cp_x - p3_x) / 3.0;
         let p2_y = p3_y + 2.0 * (cp_y - p3_y) / 3.0;
-        
+
         self.curves.push(GpuCurve {
-            p0_x, p0_y,
-            p1_x, p1_y,
-            p2_x, p2_y,
-            p3_x, p3_y,
+            p0_x,
+            p0_y,
+            p1_x,
+            p1_y,
+            p2_x,
+            p2_y,
+            p3_x,
+            p3_y,
         });
         self.current_x = p3_x;
         self.current_y = p3_y;
@@ -152,26 +220,62 @@ impl PathCollector {
     fn add_cubic(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32, is_font: bool) {
         let p0_x = self.current_x;
         let p0_y = self.current_y;
-        let p1_x = if is_font { self.tx_font(x1) } else { self.tx_shape(x1) };
-        let p1_y = if is_font { self.ty_font(y1) } else { self.ty_shape(y1) };
-        let p2_x = if is_font { self.tx_font(x2) } else { self.tx_shape(x2) };
-        let p2_y = if is_font { self.ty_font(y2) } else { self.ty_shape(y2) };
-        let p3_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
-        let p3_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
+        let p1_x = if is_font {
+            self.tx_font(x1)
+        } else {
+            self.tx_shape(x1)
+        };
+        let p1_y = if is_font {
+            self.ty_font(y1)
+        } else {
+            self.ty_shape(y1)
+        };
+        let p2_x = if is_font {
+            self.tx_font(x2)
+        } else {
+            self.tx_shape(x2)
+        };
+        let p2_y = if is_font {
+            self.ty_font(y2)
+        } else {
+            self.ty_shape(y2)
+        };
+        let p3_x = if is_font {
+            self.tx_font(x)
+        } else {
+            self.tx_shape(x)
+        };
+        let p3_y = if is_font {
+            self.ty_font(y)
+        } else {
+            self.ty_shape(y)
+        };
 
         self.curves.push(GpuCurve {
-            p0_x, p0_y,
-            p1_x, p1_y,
-            p2_x, p2_y,
-            p3_x, p3_y,
+            p0_x,
+            p0_y,
+            p1_x,
+            p1_y,
+            p2_x,
+            p2_y,
+            p3_x,
+            p3_y,
         });
         self.current_x = p3_x;
         self.current_y = p3_y;
     }
 
     fn move_to_pos(&mut self, x: f32, y: f32, is_font: bool) {
-        self.current_x = if is_font { self.tx_font(x) } else { self.tx_shape(x) };
-        self.current_y = if is_font { self.ty_font(y) } else { self.ty_shape(y) };
+        self.current_x = if is_font {
+            self.tx_font(x)
+        } else {
+            self.tx_shape(x)
+        };
+        self.current_y = if is_font {
+            self.ty_font(y)
+        } else {
+            self.ty_shape(y)
+        };
         self.start_x = self.current_x;
         self.start_y = self.current_y;
     }
@@ -196,26 +300,32 @@ impl OutlineBuilder for PathCollector {
 
     fn close(&mut self) {
         // If not at start, close it
-        if (self.current_x - self.start_x).abs() > 0.001 || (self.current_y - self.start_y).abs() > 0.001 {
-             let p0_x = self.current_x;
-             let p0_y = self.current_y;
-             let p3_x = self.start_x;
-             let p3_y = self.start_y;
-             
-             // Represent line as cubic
-             let p1_x = p0_x + (p3_x - p0_x) / 3.0;
-             let p1_y = p0_y + (p3_y - p0_y) / 3.0;
-             let p2_x = p0_x + 2.0 * (p3_x - p0_x) / 3.0;
-             let p2_y = p0_y + 2.0 * (p3_y - p0_y) / 3.0;
-             
-             self.curves.push(GpuCurve {
-                p0_x, p0_y,
-                p1_x, p1_y,
-                p2_x, p2_y,
-                p3_x, p3_y,
-             });
-             self.current_x = p3_x;
-             self.current_y = p3_y;
+        if (self.current_x - self.start_x).abs() > 0.001
+            || (self.current_y - self.start_y).abs() > 0.001
+        {
+            let p0_x = self.current_x;
+            let p0_y = self.current_y;
+            let p3_x = self.start_x;
+            let p3_y = self.start_y;
+
+            // Represent line as cubic
+            let p1_x = p0_x + (p3_x - p0_x) / 3.0;
+            let p1_y = p0_y + (p3_y - p0_y) / 3.0;
+            let p2_x = p0_x + 2.0 * (p3_x - p0_x) / 3.0;
+            let p2_y = p0_y + 2.0 * (p3_y - p0_y) / 3.0;
+
+            self.curves.push(GpuCurve {
+                p0_x,
+                p0_y,
+                p1_x,
+                p1_y,
+                p2_x,
+                p2_y,
+                p3_x,
+                p3_y,
+            });
+            self.current_x = p3_x;
+            self.current_y = p3_y;
         }
     }
 }
@@ -223,17 +333,23 @@ impl OutlineBuilder for PathCollector {
 impl PathCollector {
     fn parse_svg_path(&mut self, path: &str) {
         let mut chars = path.chars().peekable();
-        
+
         // Helper to read float consuming chars
         fn read_float(chars: &mut std::iter::Peekable<std::str::Chars>) -> Option<f32> {
             // skip ws
             while let Some(c) = chars.peek() {
-                 if c.is_whitespace() || *c == ',' { chars.next(); } else { break; }
+                if c.is_whitespace() || *c == ',' {
+                    chars.next();
+                } else {
+                    break;
+                }
             }
-            
+
             let mut s = String::new();
             if let Some(&c) = chars.peek() {
-                if c == '-' || c == '+' { s.push(chars.next()?); }
+                if c == '-' || c == '+' {
+                    s.push(chars.next()?);
+                }
             }
             while let Some(&c) = chars.peek() {
                 if c.is_ascii_digit() || c == '.' || c == 'e' || c == 'E' {
@@ -242,63 +358,71 @@ impl PathCollector {
                     break;
                 }
             }
-            if s.is_empty() { return None; }
+            if s.is_empty() {
+                return None;
+            }
             s.parse::<f32>().ok()
         }
 
         let mut cmd = ' ';
-        
+
         loop {
             // Skip WS
             while let Some(c) = chars.peek() {
-                 if c.is_whitespace() || *c == ',' { chars.next(); } else { break; }
+                if c.is_whitespace() || *c == ',' {
+                    chars.next();
+                } else {
+                    break;
+                }
             }
-            
-            if chars.peek().is_none() { break; }
-            
+
+            if chars.peek().is_none() {
+                break;
+            }
+
             if let Some(&c) = chars.peek() {
                 if c.is_ascii_alphabetic() {
                     cmd = chars.next().unwrap();
                 }
             }
-            
+
             match cmd {
                 'M' => {
-                     let x = read_float(&mut chars).unwrap_or(0.0);
-                     let y = read_float(&mut chars).unwrap_or(0.0);
-                     self.move_to_pos(x, y, false);
+                    let x = read_float(&mut chars).unwrap_or(0.0);
+                    let y = read_float(&mut chars).unwrap_or(0.0);
+                    self.move_to_pos(x, y, false);
                 }
                 'L' => {
-                     let x = read_float(&mut chars).unwrap_or(0.0);
-                     let y = read_float(&mut chars).unwrap_or(0.0);
-                     self.add_line(x, y, false);
+                    let x = read_float(&mut chars).unwrap_or(0.0);
+                    let y = read_float(&mut chars).unwrap_or(0.0);
+                    self.add_line(x, y, false);
                 }
                 'Q' => {
-                     let x1 = read_float(&mut chars).unwrap_or(0.0);
-                     let y1 = read_float(&mut chars).unwrap_or(0.0);
-                     let x = read_float(&mut chars).unwrap_or(0.0);
-                     let y = read_float(&mut chars).unwrap_or(0.0);
-                     self.add_quad(x1, y1, x, y, false);
+                    let x1 = read_float(&mut chars).unwrap_or(0.0);
+                    let y1 = read_float(&mut chars).unwrap_or(0.0);
+                    let x = read_float(&mut chars).unwrap_or(0.0);
+                    let y = read_float(&mut chars).unwrap_or(0.0);
+                    self.add_quad(x1, y1, x, y, false);
                 }
                 'C' => {
-                     let x1 = read_float(&mut chars).unwrap_or(0.0);
-                     let y1 = read_float(&mut chars).unwrap_or(0.0);
-                     let x2 = read_float(&mut chars).unwrap_or(0.0);
-                     let y2 = read_float(&mut chars).unwrap_or(0.0);
-                     let x = read_float(&mut chars).unwrap_or(0.0);
-                     let y = read_float(&mut chars).unwrap_or(0.0);
-                     self.add_cubic(x1, y1, x2, y2, x, y, false);
+                    let x1 = read_float(&mut chars).unwrap_or(0.0);
+                    let y1 = read_float(&mut chars).unwrap_or(0.0);
+                    let x2 = read_float(&mut chars).unwrap_or(0.0);
+                    let y2 = read_float(&mut chars).unwrap_or(0.0);
+                    let x = read_float(&mut chars).unwrap_or(0.0);
+                    let y = read_float(&mut chars).unwrap_or(0.0);
+                    self.add_cubic(x1, y1, x2, y2, x, y, false);
                 }
                 'Z' | 'z' => {
-                     self.close();
-                     // Z doesn't consume args, so next loop will pick up next cmd
-                     // But if there is no next cmd, we might loop forever if we enforce implicit cmd?
-                     // 'Z' typically resets implicit command to Move/Line?
-                     cmd = ' '; // Reset cmd to force explicit next command or exit
+                    self.close();
+                    // Z doesn't consume args, so next loop will pick up next cmd
+                    // But if there is no next cmd, we might loop forever if we enforce implicit cmd?
+                    // 'Z' typically resets implicit command to Move/Line?
+                    cmd = ' '; // Reset cmd to force explicit next command or exit
                 }
                 ' ' => {
                     // No command yet? consumes 1 char to advance
-                     chars.next();
+                    chars.next();
                 }
                 _ => {
                     // Unknown, skip
@@ -315,10 +439,12 @@ pub struct GlyphData {
     pub advance: f32,
     pub bearing_x: f32,
     pub bearing_y: f32,
-    pub width: f32,   // Bounding box width
-    pub height: f32,  // Bounding box height
+    pub width: f32,  // Bounding box width
+    pub height: f32, // Bounding box height
     // --- Padding to 32 bytes (16-byte alignment for stride) ---
-    pub _pad0: f32, pub _pad1: f32, pub _pad2: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
 }
 
 #[test]
@@ -339,13 +465,13 @@ pub struct KerningRecord {
 #[derive(Clone, Copy, Debug)]
 pub struct GpuNode {
     // --- Layout Inputs ---
-    pub fixed_width: f32,   // -1.0 = auto
+    pub fixed_width: f32, // -1.0 = auto
     pub min_width: f32,
-    pub max_width: f32,     // -1.0 = none
-    pub fixed_height: f32,  // -1.0 = auto
+    pub max_width: f32,    // -1.0 = none
+    pub fixed_height: f32, // -1.0 = auto
     pub min_height: f32,
-    pub max_height: f32,    // -1.0 = none
-    
+    pub max_height: f32, // -1.0 = none
+
     // --- Computed Values ---
     pub final_width: f32,
     pub desired_height: f32,
@@ -363,37 +489,37 @@ pub struct GpuNode {
     pub top_offset: f32,
     pub left_offset: f32,
     pub z_index: f32,
-    pub position_mode: u32, // 0 = Relative, 1 = Absolute
-    pub flex_direction: u32, // 0 = Row, 1 = Column
+    pub position_mode: u32,   // 0 = Relative, 1 = Absolute
+    pub flex_direction: u32,  // 0 = Row, 1 = Column
     pub justify_content: u32, // 0 = flex-start, 1 = center, 2 = flex-end, 3 = space-between, 4 = space-around, 5 = space-evenly
-    pub align_items: u32, // 0 = stretch, 1 = flex-start, 2 = center, 3 = flex-end
+    pub align_items: u32,     // 0 = stretch, 1 = flex-start, 2 = center, 3 = flex-end
 
     // --- Tree Topology (GPU Linear) ---
     pub parent_index: u32,
     pub child_start_index: u32,
     pub child_count: u32,
-    
+
     // --- Synchronization ---
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32,       // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input, Bit 4 = Hovered
+    pub flags: u32, // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input, Bit 4 = Hovered, Bit 5 = Has mouseenter listener, Bit 6 = Has mouseleave listener
     pub natural_content_width: f32,
 
     // --- Texture Atlas UVs ---
-    pub uv_min_x: f32, 
-    pub uv_min_y: f32, 
-    pub uv_max_x: f32, 
+    pub uv_min_x: f32,
+    pub uv_min_y: f32,
+    pub uv_max_x: f32,
     pub uv_max_y: f32,
-    
+
     // --- Misc ---
-    pub cpu_index: u32, 
-    pub curve_start_index: u32, 
-    pub curve_count: u32, 
+    pub cpu_index: u32,
+    pub curve_start_index: u32,
+    pub curve_count: u32,
 
     // --- GPU Style System ---
-    pub class_data_offset: u32,  // offset into node_class_list_and_inline_styles buffer
-    
+    pub class_data_offset: u32, // offset into node_class_list_and_inline_styles buffer
+
     // --- Padding ---
     pub padding_top: f32,
     pub padding_right: f32,
@@ -447,7 +573,7 @@ pub struct GpuNode {
     pub fill_color: u32,
     pub stroke_color: u32,
     pub stroke_width: f32,
-    
+
     pub _pad_styles: u32, // Padding for alignment
 }
 
@@ -497,11 +623,14 @@ impl GpuNode {
             signals_finished: 0,
             text_start: 0,
             text_length: 0,
-            flags: 1, // Default to 1 (Visible)
+            flags: NODE_FLAG_VISIBLE,
             natural_content_width: 0.0,
-            uv_min_x: 0.0, uv_min_y: 0.0, uv_max_x: 0.0, uv_max_y: 0.0,
-            cpu_index: 0, 
-            curve_start_index: 0, 
+            uv_min_x: 0.0,
+            uv_min_y: 0.0,
+            uv_max_x: 0.0,
+            uv_max_y: 0.0,
+            cpu_index: 0,
+            curve_start_index: 0,
             curve_count: 0,
             class_data_offset: 0,
             padding_top: 0.0,
@@ -565,23 +694,25 @@ pub struct CpuNode {
     pub justify_content: u32,
     pub align_items: u32,
     pub flags: u32,
-    
+
     // Text
     pub text: Option<String>,
 
     pub image_asset_id: Option<String>,
     pub shape_data: Option<String>,
-    
+
     // CSS Styles
     pub classes: Vec<String>,
     pub inline_styles: HashMap<String, StyleValue>,
-    
+
     // Cache
     pub cached_texture: Option<std::rc::Rc<texture_atlas::TextureHandle>>,
-    
+
     // Events
-    pub on_click: Option<std::rc::Rc<dyn Fn()>>,
-    
+    pub on_click: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+    pub on_mouse_enter: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+    pub on_mouse_leave: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+
     // Input Support
     pub input_type: Option<String>,
     pub on_update_model_value: Option<std::rc::Rc<dyn Fn(String)>>,
@@ -598,7 +729,7 @@ impl CpuNode {
             first_child: None,
             next_sibling: None,
             last_child: None,
-            
+
             fixed_width: -1.0,
             min_width: 0.0,
             max_width: -1.0,
@@ -610,11 +741,11 @@ impl CpuNode {
             left_offset: 0.0,
             z_index: None,
             position_mode: 0,
-            flex_direction: 0, // Row
+            flex_direction: 0,  // Row
             justify_content: 0, // flex-start
-            align_items: 0, // stretch
-            flags: 1,
-            
+            align_items: 0,     // stretch
+            flags: NODE_FLAG_VISIBLE,
+
             text: None,
             image_asset_id: None,
             shape_data: None,
@@ -622,6 +753,8 @@ impl CpuNode {
             inline_styles: HashMap::new(),
             cached_texture: None,
             on_click: None,
+            on_mouse_enter: None,
+            on_mouse_leave: None,
             input_type: None,
             on_update_model_value: None,
             scope: None,
@@ -630,8 +763,6 @@ impl CpuNode {
         }
     }
 }
-
-
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -670,20 +801,20 @@ pub struct FlexEngine {
     pub(crate) gpu_nodes: Vec<GpuNode>, // The Render Tree (Flattened)
     #[wasm_bindgen(skip)]
     pub(crate) hit_test_nodes: Vec<GpuNode>, // Stable nodes for hit testing (updated via readback)
-    
+
     #[wasm_bindgen(skip)]
     pub characters: Vec<Character>,
     #[wasm_bindgen(skip)]
     pub glyph_data: Vec<GlyphData>,
     #[wasm_bindgen(skip)]
     pub kerning_table: Vec<KerningRecord>,
-    
+
     // New GPU Vector Graphics Data
     #[wasm_bindgen(skip)]
     pub curves: Vec<GpuCurve>,
     #[wasm_bindgen(skip)]
     pub glyph_infos: Vec<GpuGlyphInfo>,
-    
+
     // Curves that are permanent (e.g. from font) and should not be cleared on flatten
     pub permanent_curve_count: usize,
 
@@ -691,7 +822,7 @@ pub struct FlexEngine {
     pub ascender: f32,
     pub descender: f32,
     pub line_gap: f32,
-    
+
     #[wasm_bindgen(skip)]
     pub face: Option<Face<'static>>,
 
@@ -713,20 +844,24 @@ pub struct FlexEngine {
 
     // --- GPU Style Buffers ---
     #[wasm_bindgen(skip)]
-    pub class_defs: Vec<u32>,         // serialized class property data
+    pub class_defs: Vec<u32>, // serialized class property data
     #[wasm_bindgen(skip)]
-    pub node_class_list_and_inline_styles: Vec<u32>,    // per-node [count, offset0, offset1, ..., CTRL_END]
+    pub node_class_list_and_inline_styles: Vec<u32>, // per-node [count, offset0, offset1, ..., CTRL_END]
     #[wasm_bindgen(skip)]
-    pub class_offsets: HashMap<String, u32>,  // selector -> offset in class_defs
+    pub class_offsets: HashMap<String, u32>, // selector -> offset in class_defs
     #[wasm_bindgen(skip)]
-    pub leaf_nodes: Vec<u32>,                 // indices of nodes with no children
+    pub leaf_nodes: Vec<u32>, // indices of nodes with no children
     #[wasm_bindgen(skip)]
-    pub panic_data: Vec<u32>,                 // [0] = error_code (prop_id)
+    pub panic_data: Vec<u32>, // [0] = error_code (prop_id)
 
     pub focused_node: Option<u32>,
     pub last_hover_target: Option<usize>,
     #[wasm_bindgen(skip)]
     pub last_hover_chain: Vec<usize>,
+    pub mouse_x: f32,
+    pub mouse_y: f32,
+    pub hover_eval_pending: bool,
+    pub has_hover_listeners: bool,
     pub dirty: bool,
     pub device_pixel_ratio: f32,
 }
@@ -738,15 +873,15 @@ impl FlexEngine {
         #[cfg(target_arch = "wasm32")]
         console_error_panic_hook::set_once();
         log("FlexEngine Initialized via WebAssembly (CpuNode Topology)");
-        
+
         let dpr = 1.0;
         #[cfg(target_arch = "wasm32")]
         let dpr = if let Some(win) = web_bindings::get_window() {
-             win.device_pixel_ratio() as f32
+            win.device_pixel_ratio() as f32
         } else {
-             1.0
+            1.0
         };
-        
+
         let mut engine = FlexEngine {
             cpu_nodes: Vec::new(),
             gpu_nodes: Vec::new(),
@@ -774,11 +909,15 @@ impl FlexEngine {
             focused_node: None,
             last_hover_target: None,
             last_hover_chain: Vec::new(),
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+            hover_eval_pending: false,
+            has_hover_listeners: false,
             hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
             device_pixel_ratio: dpr,
         };
-        
+
         engine.parse_font();
         engine
     }
@@ -794,7 +933,6 @@ impl Drop for FlexEngine {
 
 #[wasm_bindgen]
 impl FlexEngine {
-    
     fn parse_font(&mut self) {
         // Simple fixed size for demo
         let face = Face::parse(FONT_DATA, 0).expect("Error parsing font");
@@ -805,19 +943,30 @@ impl FlexEngine {
         self.ascender = face.ascender() as f32 * scale;
         self.descender = face.descender() as f32 * scale;
         self.line_gap = face.line_gap() as f32 * scale;
-        
-        log(&format!("Font loaded. UnitsPerEm: {}, Scale: {}", units_per_em, scale));
-        log(&format!("Metrics: Ascender: {}, Descender: {}, LineGap: {}", self.ascender, self.descender, self.line_gap));
-        
+
+        log(&format!(
+            "Font loaded. UnitsPerEm: {}, Scale: {}",
+            units_per_em, scale
+        ));
+        log(&format!(
+            "Metrics: Ascender: {}, Descender: {}, LineGap: {}",
+            self.ascender, self.descender, self.line_gap
+        ));
+
         // Resize glyph_data to num_glyphs
         let num_glyphs = face.number_of_glyphs();
         self.glyph_data.reserve(num_glyphs as usize);
         self.glyph_infos.reserve(num_glyphs as usize);
-        
+
         for id in 0..num_glyphs {
             let gid = GlyphId(id);
-            let bbox = face.glyph_bounding_box(gid).unwrap_or(ttf_parser::Rect { x_min: 0, y_min: 0, x_max: 0, y_max: 0 });
-            
+            let bbox = face.glyph_bounding_box(gid).unwrap_or(ttf_parser::Rect {
+                x_min: 0,
+                y_min: 0,
+                x_max: 0,
+                y_max: 0,
+            });
+
             // Generate Curves
             let start_index = self.curves.len() as u32;
             let mut collector = PathCollector::new(scale, bbox.x_min as f32, bbox.y_max as f32);
@@ -830,31 +979,29 @@ impl FlexEngine {
             self.glyph_infos.push(GpuGlyphInfo {
                 start_index,
                 count: end_index - start_index,
-                _pad0: 0, _pad1: 0,
+                _pad0: 0,
+                _pad1: 0,
             });
 
             let advance = face.glyph_hor_advance(gid).unwrap_or(0) as f32 * scale;
             let _rect = bbox; // Alias for clarity if needed, or just use bbox
             self.glyph_data.push(GlyphData {
                 advance,
-                bearing_x: bbox.x_min as f32 * scale, 
+                bearing_x: bbox.x_min as f32 * scale,
                 bearing_y: bbox.y_max as f32 * scale,
                 width: (bbox.x_max - bbox.x_min) as f32 * scale,
                 height: (bbox.y_max - bbox.y_min) as f32 * scale,
-                _pad0: 0.0, _pad1: 0.0, _pad2: 0.0,
+                _pad0: 0.0,
+                _pad1: 0.0,
+                _pad2: 0.0,
             });
         }
-        
+
         self.face = Some(face);
         self.permanent_curve_count = self.curves.len();
     }
-    
 
-
-// ...
-
-
-
+    // ...
 
     pub fn add_node(&mut self, min_width: f32) -> u32 {
         let index = if let Some(idx) = self.free_nodes.pop() {
@@ -873,24 +1020,23 @@ impl FlexEngine {
         index
     }
 
-
     // --- Topology Management (Linked List Wiring) ---
 
     pub fn set_parent(&mut self, child_id: u32, parent_id: u32) {
         let child_idx = child_id as usize;
         let parent_idx = parent_id as usize;
-        
+
         if child_idx >= self.cpu_nodes.len() || parent_idx >= self.cpu_nodes.len() {
             log("Invalid node index in set_parent");
             return;
         }
-        
+
         // 1. Unlink from old parent (if any)
         self.remove_from_parent(child_id);
 
         // 2. Link to new parent
         self.cpu_nodes[child_idx].parent = Some(parent_idx);
-        
+
         // 3. Append to parent's child list
         if let Some(last_child) = self.cpu_nodes[parent_idx].last_child {
             // Parent has children. Append to last.
@@ -901,14 +1047,14 @@ impl FlexEngine {
             self.cpu_nodes[parent_idx].first_child = Some(child_idx);
             self.cpu_nodes[parent_idx].last_child = Some(child_idx);
         }
-        
+
         self.mark_dirty();
     }
 
     pub fn insert_after_node(&mut self, child_id: u32, parent_id: u32, after_id: Option<u32>) {
         let child_idx = child_id as usize;
         let parent_idx = parent_id as usize;
-        
+
         if child_idx >= self.cpu_nodes.len() || parent_idx >= self.cpu_nodes.len() {
             log("Invalid node index in insert_after_node");
             return;
@@ -945,7 +1091,9 @@ impl FlexEngine {
 
     pub fn remove_from_parent(&mut self, node_id: u32) {
         let node_idx = node_id as usize;
-        if node_idx >= self.cpu_nodes.len() { return; }
+        if node_idx >= self.cpu_nodes.len() {
+            return;
+        }
 
         let parent_idx = match self.cpu_nodes[node_idx].parent {
             Some(p) => p,
@@ -956,7 +1104,9 @@ impl FlexEngine {
         let mut prev_sibling = None;
         let mut curr = self.cpu_nodes[parent_idx].first_child;
         while let Some(curr_idx) = curr {
-            if curr_idx == node_idx { break; }
+            if curr_idx == node_idx {
+                break;
+            }
             prev_sibling = Some(curr_idx);
             curr = self.cpu_nodes[curr_idx].next_sibling;
         }
@@ -982,7 +1132,9 @@ impl FlexEngine {
 
     pub fn clear_children(&mut self, parent_id: u32) {
         let parent_idx = parent_id as usize;
-        if parent_idx >= self.cpu_nodes.len() { return; }
+        if parent_idx >= self.cpu_nodes.len() {
+            return;
+        }
 
         let mut curr = self.cpu_nodes[parent_idx].first_child;
         while let Some(child_idx) = curr {
@@ -998,7 +1150,9 @@ impl FlexEngine {
 
     pub fn delete_node_recursive(&mut self, node_id: u32) {
         let node_idx = node_id as usize;
-        if node_idx >= self.cpu_nodes.len() { return; }
+        if node_idx >= self.cpu_nodes.len() {
+            return;
+        }
 
         // 1. Recurse to children
         let mut curr = self.cpu_nodes[node_idx].first_child;
@@ -1030,10 +1184,18 @@ impl FlexEngine {
 
 impl FlexEngine {
     pub fn add_style_rule(&mut self, selector: String, declarations: HashMap<String, StyleValue>) {
-        if let Some(pos) = self.stylesheet.rules.iter().position(|r| r.selector == selector) {
+        if let Some(pos) = self
+            .stylesheet
+            .rules
+            .iter()
+            .position(|r| r.selector == selector)
+        {
             self.stylesheet.rules[pos].declarations = declarations;
         } else {
-            self.stylesheet.rules.push(StyleRule { selector, declarations });
+            self.stylesheet.rules.push(StyleRule {
+                selector,
+                declarations,
+            });
         }
         self.mark_dirty();
     }
@@ -1045,25 +1207,39 @@ impl FlexEngine {
         for (prop, val) in resolved {
             match prop.as_str() {
                 "width" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_width = v; }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].fixed_width = v;
+                    }
                 }
                 "height" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].fixed_height = v; }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].fixed_height = v;
+                    }
                 }
                 "min-width" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].min_width = v.max(0.0); }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].min_width = v.max(0.0);
+                    }
                 }
                 "max-width" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].max_width = v.max(0.0); }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].max_width = v.max(0.0);
+                    }
                 }
                 "min-height" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].min_height = v.max(0.0); }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].min_height = v.max(0.0);
+                    }
                 }
                 "max-height" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].max_height = v.max(0.0); }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].max_height = v.max(0.0);
+                    }
                 }
                 "background-color" => {
-                    if let StyleValue::Color(r, g, b, a) = val { self.cpu_nodes[node_idx].color = (r, g, b, a); }
+                    if let StyleValue::Color(r, g, b, a) = val {
+                        self.cpu_nodes[node_idx].color = (r, g, b, a);
+                    }
                 }
                 "flex-direction" => {
                     if let StyleValue::Ident(s) = val {
@@ -1097,13 +1273,19 @@ impl FlexEngine {
                     }
                 }
                 "z-index" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].z_index = Some(v); }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].z_index = Some(v);
+                    }
                 }
                 "top" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].top_offset = v; }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].top_offset = v;
+                    }
                 }
                 "left" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].left_offset = v; }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].left_offset = v;
+                    }
                 }
                 "position" => {
                     if let StyleValue::Ident(s) = val {
@@ -1115,7 +1297,9 @@ impl FlexEngine {
                     }
                 }
                 "font-size" => {
-                    if let StyleValue::Px(v) = val { self.cpu_nodes[node_idx].font_size = v; }
+                    if let StyleValue::Px(v) = val {
+                        self.cpu_nodes[node_idx].font_size = v;
+                    }
                 }
                 _ => {}
             }
@@ -1133,7 +1317,8 @@ impl FlexEngine {
             for rule in &self.stylesheet.rules {
                 let selector = rule.selector.as_str();
                 let is_match = selector == dot_selector || selector == class_name;
-                let is_hover_match = hovered && (selector == dot_hover_selector || selector == plain_hover_selector);
+                let is_hover_match =
+                    hovered && (selector == dot_hover_selector || selector == plain_hover_selector);
                 if is_match || is_hover_match {
                     for (prop, val) in &rule.declarations {
                         resolved.insert(prop.clone(), val.clone());
@@ -1192,8 +1377,6 @@ impl FlexEngine {
 
     // ... (existing topology methods)
 
-
-
     // Deprecated / No-op in linked list mode (implicit)
     pub fn set_child_start(&mut self, _parent_index: u32, _start_index: u32) {
         // No-op
@@ -1210,7 +1393,10 @@ impl FlexEngine {
         self.node_class_list_and_inline_styles.clear();
 
         // Group rules by base selector (e.g. .btn and .btn:hover)
-        let mut grouped: HashMap<String, (HashMap<String, StyleValue>, HashMap<String, StyleValue>)> = HashMap::new();
+        let mut grouped: HashMap<
+            String,
+            (HashMap<String, StyleValue>, HashMap<String, StyleValue>),
+        > = HashMap::new();
 
         for rule in &self.stylesheet.rules {
             let (base, is_hover) = if let Some(stripped) = rule.selector.strip_suffix(":hover") {
@@ -1219,7 +1405,9 @@ impl FlexEngine {
                 (rule.selector.clone(), false)
             };
 
-            let entry = grouped.entry(base).or_insert((HashMap::new(), HashMap::new()));
+            let entry = grouped
+                .entry(base)
+                .or_insert((HashMap::new(), HashMap::new()));
             if is_hover {
                 for (k, v) in &rule.declarations {
                     entry.1.insert(k.clone(), v.clone());
@@ -1253,7 +1441,11 @@ impl FlexEngine {
                 let mut h_props: Vec<_> = hover_decls.keys().collect();
                 h_props.sort();
                 for prop in h_props {
-                    Self::serialize_property(&mut self.class_defs, prop, hover_decls.get(prop).unwrap());
+                    Self::serialize_property(
+                        &mut self.class_defs,
+                        prop,
+                        hover_decls.get(prop).unwrap(),
+                    );
                 }
             }
 
@@ -1860,21 +2052,34 @@ impl FlexEngine {
             }
         }
 
-        self.node_class_list_and_inline_styles.push(matching_offsets.len() as u32);
+        self.node_class_list_and_inline_styles
+            .push(matching_offsets.len() as u32);
         for off in matching_offsets {
             self.node_class_list_and_inline_styles.push(off);
         }
 
         // 2. Inline Styles
         let mut inline_styles = node.inline_styles.clone(); // Clone to avoid borrow issues while writing to buffer
-        
+
         // Merge imperative fields into inline styles if they are non-default
-        if node.fixed_width >= 0.0 { inline_styles.insert("width".into(), StyleValue::Px(node.fixed_width)); }
-        if node.fixed_height >= 0.0 { inline_styles.insert("height".into(), StyleValue::Px(node.fixed_height)); }
-        if node.min_width != 0.0 { inline_styles.insert("min-width".into(), StyleValue::Px(node.min_width)); }
-        if node.max_width != -1.0 { inline_styles.insert("max-width".into(), StyleValue::Px(node.max_width)); }
-        if node.min_height != 0.0 { inline_styles.insert("min-height".into(), StyleValue::Px(node.min_height)); }
-        if node.max_height != -1.0 { inline_styles.insert("max-height".into(), StyleValue::Px(node.max_height)); }
+        if node.fixed_width >= 0.0 {
+            inline_styles.insert("width".into(), StyleValue::Px(node.fixed_width));
+        }
+        if node.fixed_height >= 0.0 {
+            inline_styles.insert("height".into(), StyleValue::Px(node.fixed_height));
+        }
+        if node.min_width != 0.0 {
+            inline_styles.insert("min-width".into(), StyleValue::Px(node.min_width));
+        }
+        if node.max_width != -1.0 {
+            inline_styles.insert("max-width".into(), StyleValue::Px(node.max_width));
+        }
+        if node.min_height != 0.0 {
+            inline_styles.insert("min-height".into(), StyleValue::Px(node.min_height));
+        }
+        if node.max_height != -1.0 {
+            inline_styles.insert("max-height".into(), StyleValue::Px(node.max_height));
+        }
 
         for (prop, val) in inline_styles {
             Self::serialize_property(&mut self.node_class_list_and_inline_styles, &prop, &val);
@@ -1892,157 +2097,209 @@ impl FlexEngine {
         // 0. Pre-pass: Build class buffers & Texture Management
         self.build_class_buffers();
         self.texture_atlas.process_deletions();
+        self.has_hover_listeners = self
+            .cpu_nodes
+            .iter()
+            .any(|node| node.on_mouse_enter.is_some() || node.on_mouse_leave.is_some());
 
         // Build style map from previous frame's hit_test_nodes
-        let style_map: HashMap<u32, (u32, u32, f32, u32, u32, u32, u32)> = self.hit_test_nodes.iter()
-            .map(|n| (n.cpu_index, (
-                n.fill_color, 
-                n.stroke_color, 
-                n.stroke_width,
-                n.text_color_r.to_bits(),
-                n.text_color_g.to_bits(),
-                n.text_color_b.to_bits(),
-                n.text_color_a.to_bits()
-            )))
+        let style_map: HashMap<u32, (u32, u32, f32, u32, u32, u32, u32)> = self
+            .hit_test_nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.cpu_index,
+                    (
+                        n.fill_color,
+                        n.stroke_color,
+                        n.stroke_width,
+                        n.text_color_r.to_bits(),
+                        n.text_color_g.to_bits(),
+                        n.text_color_b.to_bits(),
+                        n.text_color_a.to_bits(),
+                    ),
+                )
+            })
             .collect();
 
         for i in 0..self.cpu_nodes.len() {
-             
-             // We work around borrow checker by extracting needed data first if possible,
-             // or just carefully using indices.
-             // We need to mutate `cached_texture`.
-             
-             // Clone ID to avoid borrow issues while mutating
-             let (image_id, w_logical, h_logical) = {
-                 let node = &self.cpu_nodes[i];
-                 if let Some(ref id) = node.image_asset_id {
-                     let w = if node.fixed_width > 0.0 { node.fixed_width } else { 64.0 };
-                     let h = if node.fixed_height > 0.0 { node.fixed_height } else { 64.0 };
-                     (Some(id.clone()), w, h)
-                 } else {
-                     (None, 0.0, 0.0)
-                 }
-             };
+            // We work around borrow checker by extracting needed data first if possible,
+            // or just carefully using indices.
+            // We need to mutate `cached_texture`.
 
-             // Clone shape data
+            // Clone ID to avoid borrow issues while mutating
+            let (image_id, w_logical, h_logical) = {
+                let node = &self.cpu_nodes[i];
+                if let Some(ref id) = node.image_asset_id {
+                    let w = if node.fixed_width > 0.0 {
+                        node.fixed_width
+                    } else {
+                        64.0
+                    };
+                    let h = if node.fixed_height > 0.0 {
+                        node.fixed_height
+                    } else {
+                        64.0
+                    };
+                    (Some(id.clone()), w, h)
+                } else {
+                    (None, 0.0, 0.0)
+                }
+            };
 
+            // Clone shape data
 
-             if let Some(id) = image_id {
-                 // Check if current cache is valid
-                 let (fill, stroke, stroke_w, tr, tg, tb, ta) = style_map.get(&(i as u32)).cloned().unwrap_or((0, 0, 0.0, 1.0f32.to_bits(), 1.0f32.to_bits(), 1.0f32.to_bits(), 1.0f32.to_bits()));
-                 
-                 // Apply Device Pixel Ratio
-                 let w = (w_logical * self.device_pixel_ratio).ceil() as u32;
-                 let h = (h_logical * self.device_pixel_ratio).ceil() as u32;
+            if let Some(id) = image_id {
+                // Check if current cache is valid
+                let (fill, stroke, stroke_w, tr, tg, tb, ta) =
+                    style_map.get(&(i as u32)).cloned().unwrap_or((
+                        0,
+                        0,
+                        0.0,
+                        1.0f32.to_bits(),
+                        1.0f32.to_bits(),
+                        1.0f32.to_bits(),
+                        1.0f32.to_bits(),
+                    ));
 
-                 let text_color_packed = Self::pack_color(
-                     f32::from_bits(tr), 
-                     f32::from_bits(tg), 
-                     f32::from_bits(tb), 
-                     f32::from_bits(ta)
-                 );
-                 
-                 // Always try to get existing handle from Atlas Cache to ensure style match
-                 let key = texture_atlas::CacheKey { 
-                     id: id.clone(), 
-                     width: w, 
-                     height: h,
-                     fill_color: fill,
-                     stroke_color: stroke,
-                     stroke_width: stroke_w.to_bits(),
-                     text_color: text_color_packed,
-                 };
-                 
-                 let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
-                           Some(h)
-                      } else {
-                           // Not in atlas. Need to load/resize/allocate.
-                           if let Some(bytes) = self.assets.get(&id).cloned() {
-                                let is_svg = id.ends_with(".svg") || (bytes.len() > 4 && bytes.as_slice().starts_with(b"<svg"));
-                                let pixels: Option<Vec<u8>> = if is_svg {
-                                     let mut final_bytes = bytes.clone();
-                                     // Inject styles if present
-                                     if fill != 0 || stroke != 0 || stroke_w > 0.0 || text_color_packed != 0xFFFFFFFF {
-                                         let mut style = String::new();
-                                         // Unpack fill
-                                         if fill != 0 {
-                                             let r = fill & 0xFF;
-                                             let g = (fill >> 8) & 0xFF;
-                                             let b = (fill >> 16) & 0xFF;
-                                             let a = ((fill >> 24) & 0xFF) as f32 / 255.0;
-                                             style.push_str(&format!("fill: rgba({},{},{},{}); ", r,g,b,a));
-                                         }
-                                         // Unpack stroke
-                                         if stroke != 0 {
-                                             let r = stroke & 0xFF;
-                                             let g = (stroke >> 8) & 0xFF;
-                                             let b = (stroke >> 16) & 0xFF;
-                                             let a = ((stroke >> 24) & 0xFF) as f32 / 255.0;
-                                             style.push_str(&format!("stroke: rgba({},{},{},{}); ", r,g,b,a));
-                                         }
-                                         // Stroke Width
-                                         if stroke_w > 0.0 {
-                                             style.push_str(&format!("stroke-width: {}px; ", stroke_w));
-                                         }
+                // Apply Device Pixel Ratio
+                let w = (w_logical * self.device_pixel_ratio).ceil() as u32;
+                let h = (h_logical * self.device_pixel_ratio).ceil() as u32;
 
-                                         // Inject Color property (for currentColor support)
-                                         let cr = f32::from_bits(tr);
-                                         let cg = f32::from_bits(tg);
-                                         let cb = f32::from_bits(tb);
-                                         let ca = f32::from_bits(ta);
-                                         style.push_str(&format!("color: rgba({},{},{},{}); ", (cr*255.0) as u8, (cg*255.0) as u8, (cb*255.0) as u8, ca));
-                                         
-                                         if let Ok(s) = std::str::from_utf8(&final_bytes) {
-                                              // Find <svg tag to inject style
-                                              // Simple search for first <svg
-                                              if let Some(idx) = s.to_lowercase().find("<svg") {
-                                                  let mut new_s = s.to_string();
-                                                  // Insert after <svg
-                                                  new_s.insert_str(idx + 4, &format!(" style=\"{}\" ", style));
-                                                  final_bytes = new_s.into_bytes();
-                                              }
-                                         }
-                                     }
+                let text_color_packed = Self::pack_color(
+                    f32::from_bits(tr),
+                    f32::from_bits(tg),
+                    f32::from_bits(tb),
+                    f32::from_bits(ta),
+                );
 
-                                     let opt = usvg::Options::default();
-                                     if let Ok(tree) = usvg::Tree::from_data(&final_bytes, &opt) {
-                                          let mut pixmap = tiny_skia::Pixmap::new(w, h).unwrap_or(tiny_skia::Pixmap::new(1, 1).unwrap());
-                                          // FitTo::Size already handles scaling to the target raster size.
-                                          // Applying an additional scale transform shrinks icons into the top-left.
-                                          let ts = tiny_skia::Transform::identity();
-                                          resvg::render(&tree, usvg::FitTo::Size(w, h), ts, pixmap.as_mut());
-                                          Some(pixmap.data().to_vec())
-                                     } else {  log(&format!("Failed to parse SVG for atlas: {}", id)); None }
-                                } else {
-                                     if let Ok(img) = image::load_from_memory(&bytes) {
-                                          let resized = img.resize_exact(w, h, image::imageops::FilterType::Lanczos3);
-                                          Some(resized.to_rgba8().into_raw())
-                                     } else { log(&format!("Failed to load image for atlas: {}", id)); None }
-                                };
-                                
-                                if let Some(p) = pixels {
-                                    self.texture_atlas.allocate(key, p)
-                                } else {
-                                    None
+                // Always try to get existing handle from Atlas Cache to ensure style match
+                let key = texture_atlas::CacheKey {
+                    id: id.clone(),
+                    width: w,
+                    height: h,
+                    fill_color: fill,
+                    stroke_color: stroke,
+                    stroke_width: stroke_w.to_bits(),
+                    text_color: text_color_packed,
+                };
+
+                let new_handle = if let Some(h) = self.texture_atlas.get_handle(&key) {
+                    Some(h)
+                } else {
+                    // Not in atlas. Need to load/resize/allocate.
+                    if let Some(bytes) = self.assets.get(&id).cloned() {
+                        let is_svg = id.ends_with(".svg")
+                            || (bytes.len() > 4 && bytes.as_slice().starts_with(b"<svg"));
+                        let pixels: Option<Vec<u8>> = if is_svg {
+                            let mut final_bytes = bytes.clone();
+                            // Inject styles if present
+                            if fill != 0
+                                || stroke != 0
+                                || stroke_w > 0.0
+                                || text_color_packed != 0xFFFFFFFF
+                            {
+                                let mut style = String::new();
+                                // Unpack fill
+                                if fill != 0 {
+                                    let r = fill & 0xFF;
+                                    let g = (fill >> 8) & 0xFF;
+                                    let b = (fill >> 16) & 0xFF;
+                                    let a = ((fill >> 24) & 0xFF) as f32 / 255.0;
+                                    style.push_str(&format!(
+                                        "fill: rgba({},{},{},{}); ",
+                                        r, g, b, a
+                                    ));
                                 }
-                           } else {
-                               // Asset not found yet
-                               None
-                           }
-                      };
-                      
-                      self.cpu_nodes[i].cached_texture = new_handle;
-             }
+                                // Unpack stroke
+                                if stroke != 0 {
+                                    let r = stroke & 0xFF;
+                                    let g = (stroke >> 8) & 0xFF;
+                                    let b = (stroke >> 16) & 0xFF;
+                                    let a = ((stroke >> 24) & 0xFF) as f32 / 255.0;
+                                    style.push_str(&format!(
+                                        "stroke: rgba({},{},{},{}); ",
+                                        r, g, b, a
+                                    ));
+                                }
+                                // Stroke Width
+                                if stroke_w > 0.0 {
+                                    style.push_str(&format!("stroke-width: {}px; ", stroke_w));
+                                }
+
+                                // Inject Color property (for currentColor support)
+                                let cr = f32::from_bits(tr);
+                                let cg = f32::from_bits(tg);
+                                let cb = f32::from_bits(tb);
+                                let ca = f32::from_bits(ta);
+                                style.push_str(&format!(
+                                    "color: rgba({},{},{},{}); ",
+                                    (cr * 255.0) as u8,
+                                    (cg * 255.0) as u8,
+                                    (cb * 255.0) as u8,
+                                    ca
+                                ));
+
+                                if let Ok(s) = std::str::from_utf8(&final_bytes) {
+                                    // Find <svg tag to inject style
+                                    // Simple search for first <svg
+                                    if let Some(idx) = s.to_lowercase().find("<svg") {
+                                        let mut new_s = s.to_string();
+                                        // Insert after <svg
+                                        new_s
+                                            .insert_str(idx + 4, &format!(" style=\"{}\" ", style));
+                                        final_bytes = new_s.into_bytes();
+                                    }
+                                }
+                            }
+
+                            let opt = usvg::Options::default();
+                            if let Ok(tree) = usvg::Tree::from_data(&final_bytes, &opt) {
+                                let mut pixmap = tiny_skia::Pixmap::new(w, h)
+                                    .unwrap_or(tiny_skia::Pixmap::new(1, 1).unwrap());
+                                // FitTo::Size already handles scaling to the target raster size.
+                                // Applying an additional scale transform shrinks icons into the top-left.
+                                let ts = tiny_skia::Transform::identity();
+                                resvg::render(&tree, usvg::FitTo::Size(w, h), ts, pixmap.as_mut());
+                                Some(pixmap.data().to_vec())
+                            } else {
+                                log(&format!("Failed to parse SVG for atlas: {}", id));
+                                None
+                            }
+                        } else {
+                            if let Ok(img) = image::load_from_memory(&bytes) {
+                                let resized =
+                                    img.resize_exact(w, h, image::imageops::FilterType::Lanczos3);
+                                Some(resized.to_rgba8().into_raw())
+                            } else {
+                                log(&format!("Failed to load image for atlas: {}", id));
+                                None
+                            }
+                        };
+
+                        if let Some(p) = pixels {
+                            self.texture_atlas.allocate(key, p)
+                        } else {
+                            None
+                        }
+                    } else {
+                        // Asset not found yet
+                        None
+                    }
+                };
+
+                self.cpu_nodes[i].cached_texture = new_handle;
+            }
         }
 
         self.gpu_nodes.clear();
         self.node_class_list_and_inline_styles.clear();
         self.characters.clear(); // Rebuild chars too since they depend on node index
         self.curves.truncate(self.permanent_curve_count);
-        
+
         // We need to map CPU Index -> GPU Index to fix up text/chars
         // But for now, let's just Traverse.
-        
+
         // Queue for BFS or Stack for DFS?
         // Layout engine (compute shader) expects:
         // - Parents appear before children? (Top Down passes)
@@ -2052,28 +2309,28 @@ impl FlexEngine {
         // Wait. Parent A. Children B, C.
         // DFS: A, B, [B's children...], C...
         // In array: [A, B, ..., C] -> B and C are NOT contiguous. C is far away.
-        
+
         // Compute Shader `width_bottom_up` loops `start` to `start + count`.
         // It IMPLICITLY assumes `nodes[start + i]` accesses the i-th child.
         // This means children MUST be contiguous in the buffer.
-        
+
         // PROBLEM: DFS Pre-order separates siblings by the entire subtree of the sibling.
         // SOLUTION: Layout order must be: [Parent, Child1, Child2, Child3, Child1_Subtree...] ?
         // No. If Parent refers to `start`, and loop iterates `count`, then Child1...ChildN MUST be adjacent.
         // [Parent, Child1, Child2, Child3, ... Grandchildren ... ]
         // This implies Breadth-First-ish grouping?
-        
+
         // Structure:
         // [Roots...]
         // [Layer 1 Children...]
         // [Layer 2 Children...]
-        
+
         // BUT: Parent needs to know `child_start_index`.
         // If we put all Layer 1 children together, they are contiguous.
         // Parent A (at 0) has children B, C (at 10, 11).
         // Parent D (at 1) has children E, F (at 12, 13).
         // This works! BFS Layout.
-        
+
         // Algorithm:
         // 1. Queue<CpuIndex>
         // 2. While Queue not empty:
@@ -2084,36 +2341,39 @@ impl FlexEngine {
         //           Push Child to Queue.
         //           Append Child to gpu_nodes.
         //           (Map cpu_idx -> gpu_idx for referencing if needed)
-        
+
         // Wait, `parent_index` in GpuNode points back to Parent.
         // If we do BFS, Parent is already placed. We know its GPU index.
-        
+
         // Let's implement BFS Flattening.
-        
+
         // Map CPU Node Index -> GPU Node Index
-        let mut cpu_to_gpu: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
-        
-        if self.cpu_nodes.is_empty() { return; }
+        let mut cpu_to_gpu: std::collections::HashMap<usize, u32> =
+            std::collections::HashMap::new();
+
+        if self.cpu_nodes.is_empty() {
+            return;
+        }
 
         self.leaf_nodes.clear();
         self.panic_data[0] = 0;
         // Let's find all roots (nodes with no parent).
         // For simple single-root UI:
         let root_idx = 0; // Assumption
-        
+
         // To handle "forests", we might iterate all, but let's assume single root for now.
-        
+
         // Step 1: Push Root
         self.gpu_nodes.push(GpuNode::new()); // Placeholder for Root
-        // We'll update Root's data later.
+                                             // We'll update Root's data later.
         cpu_to_gpu.insert(root_idx, 0);
-        
+
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(root_idx);
-        
+
         while let Some(cpu_idx) = queue.pop_front() {
             let gpu_idx = *cpu_to_gpu.get(&cpu_idx).unwrap();
-            
+
             // Extract all needed data from cpu_node into locals (drop immutable borrow early)
             let cn_first_child = self.cpu_nodes[cpu_idx].first_child;
             let cn_parent = self.cpu_nodes[cpu_idx].parent;
@@ -2122,36 +2382,45 @@ impl FlexEngine {
             let cn_min_height = self.cpu_nodes[cpu_idx].min_height;
             let cn_max_height = self.cpu_nodes[cpu_idx].max_height;
             let cn_flags = self.cpu_nodes[cpu_idx].flags;
-            let cn_cached_texture_region = self.cpu_nodes[cpu_idx].cached_texture.as_ref().map(|h| {
-                (h.region.u_min, h.region.v_min, h.region.u_max, h.region.v_max)
-            });
+            let cn_cached_texture_region =
+                self.cpu_nodes[cpu_idx].cached_texture.as_ref().map(|h| {
+                    (
+                        h.region.u_min,
+                        h.region.v_min,
+                        h.region.u_max,
+                        h.region.v_max,
+                    )
+                });
             let cn_text = self.cpu_nodes[cpu_idx].text.clone();
             let cn_shape_data = self.cpu_nodes[cpu_idx].shape_data.clone();
             let cn_font_size = self.cpu_nodes[cpu_idx].font_size;
             let transformed_text = if let Some(text_content) = &cn_text {
                 let text_transform = self.resolve_text_transform_for_node(cpu_idx);
-                Some(Self::apply_text_transform(text_content, text_transform.as_str()))
+                Some(Self::apply_text_transform(
+                    text_content,
+                    text_transform.as_str(),
+                ))
             } else {
                 None
             };
-            
+
             // Calculate Children Range
             let start_child_gpu_idx = self.gpu_nodes.len() as u32;
             let mut child_count = 0;
-            
+
             // Iterate Children to reserve/push placeholders
             let mut curr_child = cn_first_child;
             while let Some(child_cpu_idx) = curr_child {
                 let kid_gpu_idx = self.gpu_nodes.len() as u32;
                 self.gpu_nodes.push(GpuNode::new()); // Placeholder
                 cpu_to_gpu.insert(child_cpu_idx, kid_gpu_idx);
-                
+
                 queue.push_back(child_cpu_idx);
-                
+
                 child_count += 1;
                 curr_child = self.cpu_nodes[child_cpu_idx].next_sibling;
             }
-            
+
             if cn_first_child.is_none() {
                 self.leaf_nodes.push(gpu_idx);
             }
@@ -2159,7 +2428,7 @@ impl FlexEngine {
             let mut parent_gpu_idx = 0;
             if let Some(p_cpu) = cn_parent {
                 if let Some(&p_gpu) = cpu_to_gpu.get(&p_cpu) {
-                     parent_gpu_idx = p_gpu;
+                    parent_gpu_idx = p_gpu;
                 }
             }
 
@@ -2175,76 +2444,96 @@ impl FlexEngine {
                 gpu_node.max_height = cn_max_height;
                 gpu_node.flags = cn_flags;
                 if self.cpu_nodes[cpu_idx].hovered {
-                    gpu_node.flags |= 16; // Bit 4 = Hovered
+                    gpu_node.flags |= NODE_FLAG_HOVERED;
                 }
-                
+                if self.cpu_nodes[cpu_idx].on_mouse_enter.is_some() {
+                    gpu_node.flags |= NODE_FLAG_HAS_MOUSE_ENTER_LISTENER;
+                }
+                if self.cpu_nodes[cpu_idx].on_mouse_leave.is_some() {
+                    gpu_node.flags |= NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER;
+                }
+
                 gpu_node.cpu_index = cpu_idx as u32;
-                
+
                 // Topology
                 gpu_node.child_start_index = start_child_gpu_idx;
                 gpu_node.child_count = child_count;
-                
+
                 // Parent Ref
-                gpu_node.parent_index = if cn_parent.is_some() { parent_gpu_idx } else { 0 };
+                gpu_node.parent_index = if cn_parent.is_some() {
+                    parent_gpu_idx
+                } else {
+                    0
+                };
 
                 // Class data offset for GPU style resolution
                 gpu_node.class_data_offset = class_data_offset;
-                
+
                 // Image UV Resolution
                 if let Some((u_min, v_min, u_max, v_max)) = cn_cached_texture_region {
                     gpu_node.uv_min_x = u_min;
                     gpu_node.uv_min_y = v_min;
                     gpu_node.uv_max_x = u_max;
                     gpu_node.uv_max_y = v_max;
-                    gpu_node.flags |= 2; // Ensure flag is set
+                    gpu_node.flags |= NODE_FLAG_HAS_IMAGE;
                 }
-                
+
                 // Text Handling (Rebuild Characters)
                 if let Some(text_content) = transformed_text.as_ref() {
-                     let chars_start = self.characters.len() as u32;
-                     let chars_vec: Vec<char> = text_content.chars().collect();
-                     let chars_len = chars_vec.len() as u32;
-                     
-                     for (i, &c) in chars_vec.iter().enumerate() {
+                    let chars_start = self.characters.len() as u32;
+                    let chars_vec: Vec<char> = text_content.chars().collect();
+                    let chars_len = chars_vec.len() as u32;
+
+                    for (i, &c) in chars_vec.iter().enumerate() {
                         let val = c as u32;
                         let glyph_id = if let Some(face) = &self.face {
                             face.glyph_index(c).map(|g| g.0).unwrap_or(0)
-                        } else { 0 };
-                        
-                        let next_glyph_id = if i < chars_vec.len() - 1 {
-                             if let Some(face) = &self.face {
-                                face.glyph_index(chars_vec[i+1]).map(|g| g.0).unwrap_or(0)
-                            } else { 0 }
-                        } else { 0 };
-            
-                        self.characters.push(Character::new(val, glyph_id as u32, next_glyph_id as u32, gpu_idx));
+                        } else {
+                            0
+                        };
 
-                     }
-                     
-                     gpu_node.text_start = chars_start;
-                     gpu_node.text_length = chars_len;
+                        let next_glyph_id = if i < chars_vec.len() - 1 {
+                            if let Some(face) = &self.face {
+                                face.glyph_index(chars_vec[i + 1]).map(|g| g.0).unwrap_or(0)
+                            } else {
+                                0
+                            }
+                        } else {
+                            0
+                        };
+
+                        self.characters.push(Character::new(
+                            val,
+                            glyph_id as u32,
+                            next_glyph_id as u32,
+                            gpu_idx,
+                        ));
+                    }
+
+                    gpu_node.text_start = chars_start;
+                    gpu_node.text_length = chars_len;
                 }
 
                 // Shape Handling
                 if let Some(path_str) = &cn_shape_data {
-                     let start_idx = self.curves.len() as u32;
-                     let mut collector = PathCollector::new(1.0, 0.0, 0.0);
-                     collector.parse_svg_path(path_str);
-                     self.curves.extend(collector.curves);
-                     let end_idx = self.curves.len() as u32;
-                     
-                     if end_idx > start_idx {
-                         gpu_node.curve_start_index = start_idx;
-                         gpu_node.curve_count = end_idx - start_idx;
-                         gpu_node.flags |= 4; // Bit 2 = Shape
-                     }
+                    let start_idx = self.curves.len() as u32;
+                    let mut collector = PathCollector::new(1.0, 0.0, 0.0);
+                    collector.parse_svg_path(path_str);
+                    self.curves.extend(collector.curves);
+                    let end_idx = self.curves.len() as u32;
+
+                    if end_idx > start_idx {
+                        gpu_node.curve_start_index = start_idx;
+                        gpu_node.curve_count = end_idx - start_idx;
+                        gpu_node.flags |= NODE_FLAG_IS_SHAPE;
+                    }
                 }
 
                 gpu_node.font_size = cn_font_size;
             }
         }
     }
-    
+
     pub fn set_flex_direction(&mut self, node_index: u32, direction: u32) {
         if (node_index as usize) < self.cpu_nodes.len() {
             self.cpu_nodes[node_index as usize].flex_direction = direction;
@@ -2258,7 +2547,7 @@ impl FlexEngine {
             self.mark_dirty();
         }
     }
-    
+
     pub fn set_fixed_height(&mut self, node_index: u32, height: f32) {
         if (node_index as usize) < self.cpu_nodes.len() {
             self.cpu_nodes[node_index as usize].fixed_height = height;
@@ -2272,7 +2561,7 @@ impl FlexEngine {
             self.mark_dirty();
         }
     }
-    
+
     // New Setters
     pub fn set_color(&mut self, node_index: u32, r: f32, g: f32, b: f32, a: f32) {
         if (node_index as usize) < self.cpu_nodes.len() {
@@ -2306,7 +2595,9 @@ impl FlexEngine {
 #[wasm_bindgen]
 impl FlexEngine {
     pub fn set_text(&mut self, node_index: u32, text: &str) {
-        if (node_index as usize) >= self.cpu_nodes.len() { return; }
+        if (node_index as usize) >= self.cpu_nodes.len() {
+            return;
+        }
         self.cpu_nodes[node_index as usize].text = Some(text.to_string());
         self.mark_dirty();
     }
@@ -2317,19 +2608,19 @@ impl FlexEngine {
         } else {
             return;
         };
-        
+
         if let Some(id) = old_id {
             self.decrement_asset_ref(&id);
         }
-        
+
         self.increment_asset_ref(asset_id);
 
         if let Some(node) = self.cpu_nodes.get_mut(node_id as usize) {
             node.image_asset_id = Some(asset_id.to_string());
             node.cached_texture = None;
-            node.flags |= 2;
+            node.flags |= NODE_FLAG_HAS_IMAGE;
         }
-        
+
         self.mark_dirty();
     }
 
@@ -2343,7 +2634,7 @@ impl FlexEngine {
         // This implies render() must be called BEFORE this.
         self.gpu_nodes.len()
     }
-    
+
     pub fn get_node_size(&self) -> usize {
         std::mem::size_of::<GpuNode>()
     }
@@ -2354,14 +2645,12 @@ impl FlexEngine {
         // Let's call flatten just in case dirty.
         // self.render(); // recursive ref cell issue potentially if not careful?
         // Assuming renderer calls render() then asks for buffer.
-        
+
         let size = self.gpu_nodes.len() * std::mem::size_of::<GpuNode>();
         let ptr = self.gpu_nodes.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
-    
+
     // --- Public Render Entry ---
     pub fn render(&mut self) {
         // Renamed from internal implicit to explicit
@@ -2371,11 +2660,10 @@ impl FlexEngine {
         }
     }
 
-
     pub fn get_character_count(&self) -> usize {
         self.characters.len()
     }
-    
+
     pub fn get_character_size(&self) -> usize {
         std::mem::size_of::<Character>()
     }
@@ -2383,25 +2671,21 @@ impl FlexEngine {
     pub fn get_characters_buffer(&self) -> js_sys::Uint8Array {
         let size = self.characters.len() * std::mem::size_of::<Character>();
         let ptr = self.characters.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
-    
+
     pub fn get_glyph_data_count(&self) -> usize {
         self.glyph_data.len()
     }
-    
+
     pub fn get_glyph_data_size(&self) -> usize {
         std::mem::size_of::<GlyphData>()
     }
-    
+
     pub fn get_glyph_data_buffer(&self) -> js_sys::Uint8Array {
         let size = self.glyph_data.len() * std::mem::size_of::<GlyphData>();
         let ptr = self.glyph_data.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
 
     // --- New Getters ---
@@ -2409,16 +2693,12 @@ impl FlexEngine {
     pub fn get_class_defs_buffer(&self) -> js_sys::Uint8Array {
         let size = self.class_defs.len() * std::mem::size_of::<u32>();
         let ptr = self.class_defs.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
     pub fn get_node_class_list_and_inline_styles_buffer(&self) -> js_sys::Uint8Array {
         let size = self.node_class_list_and_inline_styles.len() * std::mem::size_of::<u32>();
         let ptr = self.node_class_list_and_inline_styles.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
 
     pub fn get_class_defs_count(&self) -> usize {
@@ -2432,17 +2712,13 @@ impl FlexEngine {
     pub fn get_curve_buffer(&self) -> js_sys::Uint8Array {
         let size = self.curves.len() * std::mem::size_of::<GpuCurve>();
         let ptr = self.curves.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
 
     pub fn get_glyph_info_buffer(&self) -> js_sys::Uint8Array {
         let size = self.glyph_infos.len() * std::mem::size_of::<GpuGlyphInfo>();
         let ptr = self.glyph_infos.as_ptr() as *const u8;
-        unsafe {
-            js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size))
-        }
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, size)) }
     }
 
     pub fn get_ascender(&self) -> f32 {
@@ -2457,26 +2733,25 @@ impl FlexEngine {
         self.line_gap
     }
 
-    
     pub fn update_node_flags(&mut self, node_id: u32, flags: u32) {
         if (node_id as usize) < self.cpu_nodes.len() {
-             self.cpu_nodes[node_id as usize].flags = flags;
-             self.mark_dirty();
+            self.cpu_nodes[node_id as usize].flags = flags;
+            self.mark_dirty();
         }
     }
-    
-     pub fn update_node_color(&mut self, node_id: u32, r: f32, g: f32, b: f32, a: f32) {
-              let node = &mut self.cpu_nodes[node_id as usize];
-              node.color = (r, g, b, a);
-              self.mark_dirty();
-          }
-    
+
+    pub fn update_node_color(&mut self, node_id: u32, r: f32, g: f32, b: f32, a: f32) {
+        let node = &mut self.cpu_nodes[node_id as usize];
+        node.color = (r, g, b, a);
+        self.mark_dirty();
+    }
+
     // Kerning getters omitted
-    
+
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
-    
+
     pub fn mark_dirty(&mut self) {
         if !self.dirty {
             self.dirty = true;
@@ -2484,7 +2759,7 @@ impl FlexEngine {
             web_bindings::request_render_frame();
         }
     }
-    
+
     pub fn mark_clean(&mut self) {
         self.dirty = false;
     }
@@ -2515,7 +2790,7 @@ impl FlexEngine {
 }
 
 impl FlexEngine {
-    pub fn set_on_click(&mut self, node_id: u32, f: std::rc::Rc<dyn Fn()>) {
+    pub fn set_on_click(&mut self, node_id: u32, f: std::rc::Rc<dyn Fn(UiEvent)>) {
         if let Some(node) = self.cpu_nodes.get_mut(node_id as usize) {
             node.on_click = Some(f);
         }
@@ -2524,7 +2799,10 @@ impl FlexEngine {
 
 #[wasm_bindgen]
 pub fn render_svg(_svg_content: &str, width: u32, height: u32) -> Vec<u8> {
-    log(&format!("Rendering SVG (Disabled for migration): {}x{}", width, height));
+    log(&format!(
+        "Rendering SVG (Disabled for migration): {}x{}",
+        width, height
+    ));
     Vec::new()
     /*
     let opt = Options::default();
@@ -2532,19 +2810,21 @@ pub fn render_svg(_svg_content: &str, width: u32, height: u32) -> Vec<u8> {
     */
 }
 
-
-pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEngine>>, url: String) {
+pub async fn load_image_to_engine(
+    engine: std::rc::Rc<std::cell::RefCell<FlexEngine>>,
+    url: String,
+) {
     let bytes: Vec<u8>;
 
     if url.starts_with("asset:") {
-         log("Renderer does not handle asset: URLs internally anymore. Use load_asset_bytes from App.");
-         return;
+        log("Renderer does not handle asset: URLs internally anymore. Use load_asset_bytes from App.");
+        return;
     } else {
         // HTTP Download
         // log(&format!("Downloading image: {}", url));
         let promise = crate::web_bindings::download_image(&url);
         let js_val = wasm_bindgen_futures::JsFuture::from(promise).await;
-        
+
         if let Ok(val) = js_val {
             let uint8_array = js_sys::Uint8Array::new(&val);
             bytes = uint8_array.to_vec();
@@ -2555,14 +2835,14 @@ pub async fn load_image_to_engine(engine: std::rc::Rc<std::cell::RefCell<FlexEng
     }
 
     // Determine if SVG or Image
-    // Simple check: extension or magic bytes. 
+    // Simple check: extension or magic bytes.
     // Since we control assets, extension is fine. For HTTP, we might need to guess.
     // Let's check if it looks like SVG (starts with <svg or has .svg extension in URL)
-    
+
     // Simplified: Just store the source bytes. Flatten will handle resizing/rendering.
     // Determine ID from URL
-    let id = url.clone(); 
-    
+    let id = url.clone();
+
     engine.borrow_mut().load_asset_bytes(&id, bytes);
 }
 
@@ -2575,13 +2855,45 @@ impl FlexEngine {
 
 // --- Internal Methods (Not exposed to JS) ---
 impl FlexEngine {
-    pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<std::rc::Rc<dyn Fn()>> {
-        let mut hit_idx = None;
+    fn event_target_snapshot(&self, node_idx: usize) -> UiEventTarget {
+        let fallback = UiEventTarget {
+            id: node_idx as u32,
+            inner_text: String::new(),
+            classes: Vec::new(),
+        };
+        let Some(node) = self.cpu_nodes.get(node_idx) else {
+            return fallback;
+        };
+        UiEventTarget {
+            id: node_idx as u32,
+            inner_text: node.text.clone().unwrap_or_default(),
+            classes: node.classes.clone(),
+        }
+    }
+
+    fn build_ui_event(
+        &self,
+        event_type: &str,
+        target_idx: usize,
+        current_target_idx: usize,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> UiEvent {
+        UiEvent {
+            event_type: event_type.to_string(),
+            target: self.event_target_snapshot(target_idx),
+            current_target: self.event_target_snapshot(current_target_idx),
+            mouse_x,
+            mouse_y,
+        }
+    }
+
+    fn hit_test_cpu_index(&self, x: f32, y: f32) -> Option<usize> {
         for i in (0..self.hit_test_nodes.len()).rev() {
             let n = &self.hit_test_nodes[i];
-            
-            // Skip invisible if flag bit 0 is Not set
-            if (n.flags & 1) == 0 { continue; }
+            if (n.flags & NODE_FLAG_VISIBLE) == 0 {
+                continue;
+            }
 
             let left = n.final_x;
             let top = n.final_y;
@@ -2589,39 +2901,39 @@ impl FlexEngine {
             let bottom = top + n.final_height;
 
             if x >= left && x <= right && y >= top && y <= bottom {
-                hit_idx = Some(i);
-                log(&format!("Hit Node: {} at ({} , {}). rect: [{}, {}, {}, {}]", i, x, y, left, top, right, bottom));
-                break;
+                return Some(n.cpu_index as usize);
             }
         }
+        None
+    }
 
-        if hit_idx.is_none() {
-            log(&format!("No hit at ({} , {})", x, y));
+    pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
+        let target_cpu_idx = self.hit_test_cpu_index(x, y);
+
+        if target_cpu_idx.is_none() {
             self.focused_node = None;
         }
 
         let mut callbacks = Vec::new();
 
-        if let Some(gpu_idx) = hit_idx {
-            let initial_cpu_idx = self.hit_test_nodes[gpu_idx].cpu_index as usize;
-            
-            // Event Bubbling
+        if let Some(initial_cpu_idx) = target_cpu_idx {
             let mut current_cpu_idx = Some(initial_cpu_idx);
 
             while let Some(cpu_idx) = current_cpu_idx {
                 if let Some(node) = self.cpu_nodes.get(cpu_idx) {
                     if let Some(cb) = &node.on_click {
-                        callbacks.push(cb.clone());
+                        let event = self.build_ui_event("click", initial_cpu_idx, cpu_idx, x, y);
+                        callbacks.push((cb.clone(), event));
                         break;
                     }
-                    
-                    // Focus handling for inputs
+
                     if node.input_type.is_some() {
                         self.focused_node = Some(cpu_idx as u32);
-                        log(&format!("Focused Input Node: {}", cpu_idx));
                     }
-                    
+
                     current_cpu_idx = node.parent;
+                } else {
+                    break;
                 }
             }
         }
@@ -2630,35 +2942,25 @@ impl FlexEngine {
     }
 
     pub fn handle_mousemove(&mut self, x: f32, y: f32) {
-        let mut hit_idx = None;
-        // Search backwards to find topmost element
-        for i in (0..self.hit_test_nodes.len()).rev() {
-            let n = &self.hit_test_nodes[i];
-            
-            // Skip invisible if flag bit 0 is Not set
-            if (n.flags & 1) == 0 { continue; }
+        self.mouse_x = x;
+        self.mouse_y = y;
+        self.hover_eval_pending = true;
+        self.mark_dirty();
+    }
 
-            let left = n.final_x;
-            let top = n.final_y;
-            let right = left + n.final_width;
-            let bottom = top + n.final_height;
-
-            if x >= left && x <= right && y >= top && y <= bottom {
-                hit_idx = Some(i);
-                break;
-            }
+    pub fn process_hover_from_latest_hit_test(
+        &mut self,
+    ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
+        if !self.hover_eval_pending {
+            return Vec::new();
         }
+        self.hover_eval_pending = false;
 
-        let target_cpu_idx = hit_idx.map(|idx| self.hit_test_nodes[idx].cpu_index as usize);
-        
-        // Only update if the leaf hover target has changed
+        let target_cpu_idx = self.hit_test_cpu_index(self.mouse_x, self.mouse_y);
         if target_cpu_idx == self.last_hover_target {
-            return;
+            return Vec::new();
         }
 
-        let mut changed_hover = false;
-
-        // Build target chain root->leaf for efficient diff against previous hover chain.
         let mut new_chain = Vec::new();
         let mut curr = target_cpu_idx;
         while let Some(idx) = curr {
@@ -2670,7 +2972,6 @@ impl FlexEngine {
         }
         new_chain.reverse();
 
-        // Find common prefix to avoid touching unaffected nodes.
         let mut common = 0usize;
         while common < self.last_hover_chain.len()
             && common < new_chain.len()
@@ -2679,19 +2980,35 @@ impl FlexEngine {
             common += 1;
         }
 
-        // Un-hover nodes no longer in the chain.
+        let mut changed_hover = false;
+        let mut leave_callbacks = Vec::new();
+        let mut enter_callbacks = Vec::new();
+
         for &idx in self.last_hover_chain[common..].iter().rev() {
-            if idx < self.cpu_nodes.len() && self.cpu_nodes[idx].hovered {
+            if idx >= self.cpu_nodes.len() {
+                continue;
+            }
+            if self.cpu_nodes[idx].hovered {
                 self.cpu_nodes[idx].hovered = false;
                 changed_hover = true;
             }
+            if let Some(cb) = &self.cpu_nodes[idx].on_mouse_leave {
+                let event = self.build_ui_event("mouseleave", idx, idx, self.mouse_x, self.mouse_y);
+                leave_callbacks.push((cb.clone(), event));
+            }
         }
 
-        // Hover newly entered nodes.
         for &idx in &new_chain[common..] {
-            if idx < self.cpu_nodes.len() && !self.cpu_nodes[idx].hovered {
+            if idx >= self.cpu_nodes.len() {
+                continue;
+            }
+            if !self.cpu_nodes[idx].hovered {
                 self.cpu_nodes[idx].hovered = true;
                 changed_hover = true;
+            }
+            if let Some(cb) = &self.cpu_nodes[idx].on_mouse_enter {
+                let event = self.build_ui_event("mouseenter", idx, idx, self.mouse_x, self.mouse_y);
+                enter_callbacks.push((cb.clone(), event));
             }
         }
 
@@ -2701,6 +3018,9 @@ impl FlexEngine {
         if changed_hover {
             self.mark_dirty();
         }
+
+        leave_callbacks.extend(enter_callbacks);
+        leave_callbacks
     }
 
     pub fn handle_keydown(&mut self, key: String) -> Option<(std::rc::Rc<dyn Fn(String)>, String)> {
@@ -2714,11 +3034,13 @@ impl FlexEngine {
                 Some(n) => n,
                 None => return None,
             };
-            
+
             (
                 node.text.clone().unwrap_or_default(),
-                node.input_type.clone().unwrap_or_else(|| "text".to_string()),
-                node.on_update_model_value.clone()
+                node.input_type
+                    .clone()
+                    .unwrap_or_else(|| "text".to_string()),
+                node.on_update_model_value.clone(),
             )
         };
 
@@ -2730,7 +3052,7 @@ impl FlexEngine {
             // Validation based on type
             let c = key.chars().next().unwrap();
             let mut allowed = true;
-            
+
             if input_type == "float64" {
                 allowed = c.is_ascii_digit() || c == '.' || (c == '-' && next_text.is_empty());
             } else if input_type == "int64" {
@@ -2750,10 +3072,16 @@ impl FlexEngine {
         None
     }
 
-    pub fn add_image_to_atlas(&mut self, id: String, width: u32, height: u32, data: Vec<u8>) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {
-        let key = texture_atlas::CacheKey { 
-            id, 
-            width, 
+    pub fn add_image_to_atlas(
+        &mut self,
+        id: String,
+        width: u32,
+        height: u32,
+        data: Vec<u8>,
+    ) -> Option<std::rc::Rc<texture_atlas::TextureHandle>> {
+        let key = texture_atlas::CacheKey {
+            id,
+            width,
             height,
             fill_color: 0,
             stroke_color: 0,
@@ -2774,17 +3102,17 @@ impl FlexEngine {
     pub fn assign_image_to_node(&mut self, node_id: u32, _region: texture_atlas::AtlasRegion) {
         let idx = node_id as usize;
         if idx < self.cpu_nodes.len() {
-           // We need to store this in CPU node?
-           // Currently CpuNode doesn't have UVs.
-           // We should add UVs to CpuNode to mirror GpuNode.
+            // We need to store this in CPU node?
+            // Currently CpuNode doesn't have UVs.
+            // We should add UVs to CpuNode to mirror GpuNode.
         }
     }
-    
+
     // Stores raw asset data for resizing later
     pub fn load_asset_bytes(&mut self, id: &str, data: Vec<u8>) {
-         self.assets.insert(id.to_string(), data);
+        self.assets.insert(id.to_string(), data);
     }
-    
+
     pub fn get_asset_data(&self, id: &str) -> Option<&Vec<u8>> {
         self.assets.get(id)
     }

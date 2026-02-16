@@ -1,7 +1,7 @@
+use guillotiere::{Allocation, AtlasAllocator, Size};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::cell::RefCell;
-use guillotiere::{AtlasAllocator, Size, Allocation};
 
 // We store the full Allocation in the deallocation queue to avoid importing specific ID types.
 
@@ -59,7 +59,9 @@ impl Drop for TextureHandle {
     fn drop(&mut self) {
         // Notify Atlas that this allocation is free.
         // We push to the shared queue.
-        self.deallocation_queue.borrow_mut().push(self.region.allocation);
+        self.deallocation_queue
+            .borrow_mut()
+            .push(self.region.allocation);
         // crate::log(&format!("TextureHandle dropped: {:?}", self.region.allocation.id));
     }
 }
@@ -68,14 +70,14 @@ pub struct TextureAtlas {
     pub width: u32,
     pub height: u32,
     allocator: AtlasAllocator,
-    
+
     // Shared queue for dropped handles to report back
     deallocation_queue: Rc<RefCell<Vec<Allocation>>>,
-    
+
     // Cache: Weak references to active handles.
     // If upgrade fails, the handle is gone, and likely in the deallocation queue (or about to be).
     cache: HashMap<CacheKey, Weak<TextureHandle>>,
-    
+
     pub dirty: bool,
     // We store the pending upload data.
     // Ideally we would just write to GPU immediately, but we batch it here for `render()`.
@@ -99,11 +101,11 @@ impl TextureAtlas {
     pub fn process_deletions(&mut self) {
         let mut queue = self.deallocation_queue.borrow_mut();
         if queue.is_empty() {
-             // Still purge cache if needed (though usually drain corresponds to drops)
-             self.cache.retain(|_, weak| weak.upgrade().is_some());
-             return; 
+            // Still purge cache if needed (though usually drain corresponds to drops)
+            self.cache.retain(|_, weak| weak.upgrade().is_some());
+            return;
         }
-        
+
         for allocation in queue.drain(..) {
             self.allocator.deallocate(allocation.id);
             // crate::log(&format!("Deallocated texture region via handle drop"));
@@ -121,13 +123,13 @@ impl TextureAtlas {
             }
             // If dead, we'll overwrite it below.
         }
-        
+
         // 2. Process Deletions (Free up space before alloc)
         self.process_deletions();
 
         let w = key.width as i32;
         let h = key.height as i32;
-        
+
         // 3. Allocate using Guillotiere
         let allocation = match self.allocator.allocate(Size::new(w, h)) {
             Some(a) => a,
@@ -137,28 +139,28 @@ impl TextureAtlas {
                 return None;
             }
         };
-        
+
         let region = AtlasRegion::new(allocation, self.width, self.height);
-        
+
         // 5. Create Handle
         let handle = Rc::new(TextureHandle {
             region: region.clone(),
             deallocation_queue: self.deallocation_queue.clone(),
         });
-        
+
         // 6. Queue Upload
         self.pending_uploads.push((region, pixels));
         self.dirty = true;
-        
+
         // 7. Store in Cache
         self.cache.insert(key, Rc::downgrade(&handle));
-        
+
         Some(handle)
     }
-    
+
     pub fn get_handle(&self, key: &CacheKey) -> Option<Rc<TextureHandle>> {
         if let Some(weak) = self.cache.get(key) {
-             weak.upgrade()
+            weak.upgrade()
         } else {
             None
         }

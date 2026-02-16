@@ -1,10 +1,12 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(dead_code)]
+use js_sys::{Object, Promise, Reflect};
 use wasm_bindgen::prelude::*;
-use js_sys::{Object, Reflect, Promise};
 
-#[wasm_bindgen(inline_js = "export function get_window() { return typeof window !== 'undefined' ? window : undefined; }")]
+#[wasm_bindgen(
+    inline_js = "export function get_window() { return typeof window !== 'undefined' ? window : undefined; }"
+)]
 extern "C" {
     pub fn get_window() -> Option<Window>;
 }
@@ -134,13 +136,29 @@ extern "C" {
 
     // GpuQueue methods
     #[wasm_bindgen(method, js_name = writeBuffer)]
-    pub fn write_buffer_with_f64_and_js_value(this: &GpuQueue, buffer: &GpuBuffer, buffer_offset: f64, data: &JsValue);
+    pub fn write_buffer_with_f64_and_js_value(
+        this: &GpuQueue,
+        buffer: &GpuBuffer,
+        buffer_offset: f64,
+        data: &JsValue,
+    );
 
     #[wasm_bindgen(method, js_name = writeBuffer)]
-    pub fn write_buffer_with_u8_array(this: &GpuQueue, buffer: &GpuBuffer, buffer_offset: f64, data: &[u8]);
+    pub fn write_buffer_with_u8_array(
+        this: &GpuQueue,
+        buffer: &GpuBuffer,
+        buffer_offset: f64,
+        data: &[u8],
+    );
 
     #[wasm_bindgen(method, js_name = writeTexture)]
-    pub fn write_texture_with_u8_array(this: &GpuQueue, destination: &Object, data: &[u8], data_layout: &Object, size: &Object);
+    pub fn write_texture_with_u8_array(
+        this: &GpuQueue,
+        destination: &Object,
+        data: &[u8],
+        data_layout: &Object,
+        size: &Object,
+    );
 
     #[wasm_bindgen(method)]
     pub fn submit(this: &GpuQueue, command_buffers: &js_sys::Array);
@@ -163,13 +181,24 @@ extern "C" {
     pub fn begin_compute_pass(this: &GpuCommandEncoder) -> GpuComputePassEncoder;
 
     #[wasm_bindgen(method, js_name = beginComputePass)]
-    pub fn begin_compute_pass_with_descriptor(this: &GpuCommandEncoder, descriptor: &Object) -> GpuComputePassEncoder;
+    pub fn begin_compute_pass_with_descriptor(
+        this: &GpuCommandEncoder,
+        descriptor: &Object,
+    ) -> GpuComputePassEncoder;
 
     #[wasm_bindgen(method, js_name = beginRenderPass)]
-    pub fn begin_render_pass(this: &GpuCommandEncoder, descriptor: &Object) -> GpuRenderPassEncoder;
+    pub fn begin_render_pass(this: &GpuCommandEncoder, descriptor: &Object)
+        -> GpuRenderPassEncoder;
 
     #[wasm_bindgen(method, js_name = copyBufferToBuffer)]
-    pub fn copy_buffer_to_buffer(this: &GpuCommandEncoder, src: &GpuBuffer, src_offset: f64, dst: &GpuBuffer, dst_offset: f64, size: f64);
+    pub fn copy_buffer_to_buffer(
+        this: &GpuCommandEncoder,
+        src: &GpuBuffer,
+        src_offset: f64,
+        dst: &GpuBuffer,
+        dst_offset: f64,
+        size: f64,
+    );
 
     #[wasm_bindgen(method)]
     pub fn finish(this: &GpuCommandEncoder) -> GpuCommandBuffer;
@@ -179,7 +208,11 @@ extern "C" {
     pub fn set_pipeline_compute(this: &GpuComputePassEncoder, pipeline: &GpuComputePipeline);
 
     #[wasm_bindgen(method, js_name = setBindGroup)]
-    pub fn set_bind_group_compute(this: &GpuComputePassEncoder, index: u32, bind_group: &GpuBindGroup);
+    pub fn set_bind_group_compute(
+        this: &GpuComputePassEncoder,
+        index: u32,
+        bind_group: &GpuBindGroup,
+    );
 
     #[wasm_bindgen(method)]
     pub fn dispatchWorkgroups(this: &GpuComputePassEncoder, x: u32, y: u32, z: u32);
@@ -192,10 +225,20 @@ extern "C" {
     pub fn set_pipeline_render(this: &GpuRenderPassEncoder, pipeline: &GpuRenderPipeline);
 
     #[wasm_bindgen(method, js_name = setBindGroup)]
-    pub fn set_bind_group_render(this: &GpuRenderPassEncoder, index: u32, bind_group: &GpuBindGroup);
+    pub fn set_bind_group_render(
+        this: &GpuRenderPassEncoder,
+        index: u32,
+        bind_group: &GpuBindGroup,
+    );
 
     #[wasm_bindgen(method, js_name = draw)]
-    pub fn draw_with_instance_count(this: &GpuRenderPassEncoder, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32);
+    pub fn draw_with_instance_count(
+        this: &GpuRenderPassEncoder,
+        vertex_count: u32,
+        instance_count: u32,
+        first_vertex: u32,
+        first_instance: u32,
+    );
 
     #[wasm_bindgen(method, js_name = end)]
     pub fn end_render(this: &GpuRenderPassEncoder);
@@ -274,7 +317,7 @@ impl GpuBindGroupLayoutEntry {
         let obj = Object::new();
         Reflect::set(&obj, &"binding".into(), &binding.into()).unwrap();
         Reflect::set(&obj, &"visibility".into(), &visibility.into()).unwrap();
-        
+
         let texture = Object::new();
         // viewDimension defaults to "2d", sampleType defaults to "float"
         Reflect::set(&obj, &"texture".into(), &texture).unwrap();
@@ -507,4 +550,3 @@ impl GpuSamplerDescriptor {
         obj
     }
 }
-

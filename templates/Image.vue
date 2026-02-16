@@ -27,7 +27,13 @@
 
     <div class="main-content">
       <div class="top-bar">
-        <div class="menu-item">File</div>
+        <div 
+          class="menu-item"
+          @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); }"
+          @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); }"
+        >
+          File
+        </div>
         <div class="menu-item">Edit</div>
         <div class="menu-item">View</div>
         <div class="menu-item">Object</div>

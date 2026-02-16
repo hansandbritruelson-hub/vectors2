@@ -1,6 +1,6 @@
-use std::cell::RefCell;
-use std::collections::{HashSet, HashMap};
 use std::any::Any;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 
 // --- Types ---
 
@@ -72,7 +72,7 @@ impl Runtime {
             for effect_id in data.effects {
                 self.effects.remove(&effect_id);
                 self.effect_scopes.remove(&effect_id);
-                
+
                 // Optimized subscriber cleanup
                 if let Some(deps) = self.effect_dependencies.remove(&effect_id) {
                     for signal_id in deps {
@@ -127,21 +127,30 @@ pub fn create_signal<T: 'static + Clone>(initial_value: T) -> (ReadSignal<T>, Wr
         let id = rt.next_signal_id;
         rt.next_signal_id += 1;
         rt.signals.insert(id, Box::new(initial_value));
-        
+
         if let Some(scope_id) = rt.current_scope {
             if let Some(scope) = rt.scopes.get_mut(&scope_id) {
                 scope.signals.push(id);
             }
         } else {
-            crate::log(&format!("WARNING: Signal created outside of scope! This will NEVER be freed. id={}", id));
+            crate::log(&format!(
+                "WARNING: Signal created outside of scope! This will NEVER be freed. id={}",
+                id
+            ));
         }
-        
+
         id
     });
 
     (
-        ReadSignal { id, _marker: std::marker::PhantomData },
-        WriteSignal { id, _marker: std::marker::PhantomData }
+        ReadSignal {
+            id,
+            _marker: std::marker::PhantomData,
+        },
+        WriteSignal {
+            id,
+            _marker: std::marker::PhantomData,
+        },
     )
 }
 
@@ -153,7 +162,7 @@ where
         let mut rt = rt.borrow_mut();
         let id = rt.next_effect_id;
         rt.next_effect_id += 1;
-        rt.effects.insert(id, Box::new(effect_fn)); 
+        rt.effects.insert(id, Box::new(effect_fn));
 
         if let Some(scope_id) = rt.current_scope {
             if let Some(scope) = rt.scopes.get_mut(&scope_id) {
@@ -161,7 +170,10 @@ where
                 rt.effect_scopes.insert(id, scope_id);
             }
         } else {
-            crate::log(&format!("WARNING: Effect created outside of scope! This will NEVER be freed. id={}", id));
+            crate::log(&format!(
+                "WARNING: Effect created outside of scope! This will NEVER be freed. id={}",
+                id
+            ));
         }
 
         id
@@ -170,8 +182,9 @@ where
     run_effect(id);
 }
 
-pub fn create_root<F, T>(f: F) -> T 
-where F: FnOnce(Scope) -> T
+pub fn create_root<F, T>(f: F) -> T
+where
+    F: FnOnce(Scope) -> T,
 {
     struct ScopeGuard {
         prev_scope: Option<ScopeId>,
@@ -188,22 +201,25 @@ where F: FnOnce(Scope) -> T
         let mut rt = rt.borrow_mut();
         let id = rt.next_scope_id;
         rt.next_scope_id += 1;
-        
+
         let parent = rt.current_scope;
-        rt.scopes.insert(id, ScopeData {
-            signals: Vec::new(),
-            effects: Vec::new(),
-            sub_scopes: Vec::new(),
-            parent,
-            cleanups: Vec::new(),
-        });
-        
+        rt.scopes.insert(
+            id,
+            ScopeData {
+                signals: Vec::new(),
+                effects: Vec::new(),
+                sub_scopes: Vec::new(),
+                parent,
+                cleanups: Vec::new(),
+            },
+        );
+
         if let Some(p) = parent {
             if let Some(p_data) = rt.scopes.get_mut(&p) {
                 p_data.sub_scopes.push(id);
             }
         }
-        
+
         let prev = rt.current_scope;
         rt.current_scope = Some(id);
         (id, ScopeGuard { prev_scope: prev })
@@ -227,8 +243,9 @@ impl Scope {
     }
 }
 
-pub fn on_cleanup<F>(f: F) 
-where F: FnOnce() + 'static
+pub fn on_cleanup<F>(f: F)
+where
+    F: FnOnce() + 'static,
 {
     RUNTIME.with(|rt| {
         let mut rt = rt.borrow_mut();
@@ -266,15 +283,19 @@ impl<T: 'static + Clone> ReadSignal<T> {
     pub fn get(&self) -> T {
         RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
-            
+
             // Dependency Tracking: If we are inside an effect, record this signal as a dependency
             if let Some(effect_id) = rt.current_effect {
                 rt.subscribers.entry(self.id).or_default().insert(effect_id);
-                rt.effect_dependencies.entry(effect_id).or_default().insert(self.id);
+                rt.effect_dependencies
+                    .entry(effect_id)
+                    .or_default()
+                    .insert(self.id);
             }
 
             // Return the value
-            rt.signals.get(&self.id)
+            rt.signals
+                .get(&self.id)
                 .expect("Signal not found")
                 .downcast_ref::<T>()
                 .expect("Signal type mismatch")
@@ -301,13 +322,13 @@ impl<T: 'static + Clone> WriteSignal<T> {
         let val: T = new_value.into();
         let effects_to_run = RUNTIME.with(|rt| {
             let mut rt = rt.borrow_mut();
-            
+
             // 1. Update value
             rt.signals.insert(self.id, Box::new(val));
 
             // 2. Collect subscribers
             if let Some(subs) = rt.subscribers.get(&self.id) {
-                subs.clone() 
+                subs.clone()
             } else {
                 HashSet::new()
             }
@@ -319,22 +340,24 @@ impl<T: 'static + Clone> WriteSignal<T> {
         }
     }
 
-    pub fn update<F>(&self, f: F) 
-    where F: FnOnce(&T) -> T 
+    pub fn update<F>(&self, f: F)
+    where
+        F: FnOnce(&T) -> T,
     {
         // 1. Get current value
         let current: T = RUNTIME.with(|rt| {
             let rt = rt.borrow();
-             rt.signals.get(&self.id)
+            rt.signals
+                .get(&self.id)
                 .expect("Signal downcast error")
                 .downcast_ref::<T>()
                 .unwrap()
                 .clone()
         });
-        
+
         // 2. Compute new value
         let new_val = f(&current);
-        
+
         // 3. Set
         self.set(new_val);
     }
@@ -344,9 +367,7 @@ impl<T: 'static + Clone> WriteSignal<T> {
 
 fn run_effect(id: EffectId) {
     // 1. Extract the effect closure (take ownership temporarily)
-    let effect_opt = RUNTIME.with(|rt| {
-        rt.borrow_mut().effects.remove(&id)
-    });
+    let effect_opt = RUNTIME.with(|rt| rt.borrow_mut().effects.remove(&id));
 
     if let Some(mut f) = effect_opt {
         // 2. Set current_effect context and scope context
@@ -385,7 +406,7 @@ fn run_effect(id: EffectId) {
             let mut rt = rt.borrow_mut();
             rt.current_effect = prev_effect;
             rt.current_scope = prev_scope;
-            
+
             // If the effect had a scope and that scope was disposed, don't put it back.
             // If it had NO scope, it's global and should persist.
             let should_persist = if let Some(sid) = rt.effect_scopes.get(&id) {
@@ -408,23 +429,33 @@ pub trait ToReactiveString {
 }
 
 impl<T: std::fmt::Display + Clone + 'static> ToReactiveString for ReadSignal<T> {
-    fn to_reactive_string(&self) -> String { self.get().to_string() }
+    fn to_reactive_string(&self) -> String {
+        self.get().to_string()
+    }
 }
 
 impl ToReactiveString for String {
-    fn to_reactive_string(&self) -> String { self.clone() }
+    fn to_reactive_string(&self) -> String {
+        self.clone()
+    }
 }
 
 impl ToReactiveString for &str {
-    fn to_reactive_string(&self) -> String { self.to_string() }
+    fn to_reactive_string(&self) -> String {
+        self.to_string()
+    }
 }
 
 impl ToReactiveString for i32 {
-    fn to_reactive_string(&self) -> String { self.to_string() }
+    fn to_reactive_string(&self) -> String {
+        self.to_string()
+    }
 }
 
 impl ToReactiveString for f32 {
-    fn to_reactive_string(&self) -> String { self.to_string() }
+    fn to_reactive_string(&self) -> String {
+        self.to_string()
+    }
 }
 
 pub trait ToBool {
@@ -432,11 +463,15 @@ pub trait ToBool {
 }
 
 impl ToBool for bool {
-    fn to_bool(&self) -> bool { *self }
+    fn to_bool(&self) -> bool {
+        *self
+    }
 }
 
 impl ToBool for ReadSignal<bool> {
-    fn to_bool(&self) -> bool { self.get() }
+    fn to_bool(&self) -> bool {
+        self.get()
+    }
 }
 
 impl<T, Rhs> PartialEq<Rhs> for ReadSignal<T>
@@ -451,18 +486,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn test_stale_subscription_leak() {
         let (read_cond, write_cond) = create_signal(true);
         let (read_a, write_a) = create_signal(1i32);
         let (read_b, write_b) = create_signal(10i32);
-        
+
         let call_count = Rc::new(RefCell::new(0));
         let cc = call_count.clone();
-        
+
         create_effect(move || {
             *cc.borrow_mut() += 1;
             if read_cond.get() {
@@ -471,21 +506,21 @@ mod tests {
                 read_b.get();
             }
         });
-        
+
         assert_eq!(*call_count.borrow(), 1);
-        
+
         // Update A (should trigger)
         write_a.set(2i32);
         assert_eq!(*call_count.borrow(), 2);
-        
+
         // Switch condition
         write_cond.set(false);
         assert_eq!(*call_count.borrow(), 3);
-        
+
         // Update A again (should NOT trigger anymore because it's no longer read)
         write_a.set(3i32);
         assert_eq!(*call_count.borrow(), 3);
-        
+
         // Update B (should trigger now)
         write_b.set(11i32);
         assert_eq!(*call_count.borrow(), 4);
@@ -495,10 +530,8 @@ mod tests {
     fn test_subscriber_cleanup() {
         reset_runtime();
         let (read_a, _write_a) = create_signal(1i32);
-        
-        let sub_count = RUNTIME.with(|rt| {
-            rt.borrow().subscribers.len()
-        });
+
+        let sub_count = RUNTIME.with(|rt| rt.borrow().subscribers.len());
         assert_eq!(sub_count, 0);
 
         let scope = create_root(|s| {
@@ -508,16 +541,15 @@ mod tests {
             s
         });
 
-        let sub_count = RUNTIME.with(|rt| {
-            rt.borrow().subscribers.len()
-        });
+        let sub_count = RUNTIME.with(|rt| rt.borrow().subscribers.len());
         assert_eq!(sub_count, 1);
 
         scope.dispose();
 
-        let sub_count = RUNTIME.with(|rt| {
-            rt.borrow().subscribers.len()
-        });
-        assert_eq!(sub_count, 0, "Subscribers map should be empty after scope disposal");
+        let sub_count = RUNTIME.with(|rt| rt.borrow().subscribers.len());
+        assert_eq!(
+            sub_count, 0,
+            "Subscribers map should be empty after scope disposal"
+        );
     }
 }
