@@ -35,8 +35,6 @@ pub(crate) const NODE_FLAG_IS_INPUT: u32 = 1 << 3;
 pub(crate) const NODE_FLAG_HOVERED: u32 = 1 << 4;
 pub(crate) const NODE_FLAG_HAS_MOUSE_ENTER_LISTENER: u32 = 1 << 5;
 pub(crate) const NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER: u32 = 1 << 6;
-pub(crate) const NODE_FLAG_MOUSE_ENTER_TRIGGERED: u32 = 1 << 7;
-pub(crate) const NODE_FLAG_MOUSE_LEAVE_TRIGGERED: u32 = 1 << 8;
 
 #[derive(Clone, Debug)]
 pub struct UiEventTarget {
@@ -2867,21 +2865,20 @@ impl FlexEngine {
                 continue;
             }
             let is_hovered = (node.flags & NODE_FLAG_HOVERED) != 0;
-            let leave_triggered = (node.flags & NODE_FLAG_MOUSE_LEAVE_TRIGGERED) != 0;
-            let enter_triggered = (node.flags & NODE_FLAG_MOUSE_ENTER_TRIGGERED) != 0;
+            let was_hovered = self.cpu_nodes[idx].hovered;
             let mut leave_cb = None;
             let mut enter_cb = None;
 
             {
                 let cpu_node = &mut self.cpu_nodes[idx];
-                if cpu_node.hovered != is_hovered {
+                if was_hovered != is_hovered {
                     cpu_node.hovered = is_hovered;
                     changed_hover = true;
                 }
-                if leave_triggered {
+                if was_hovered && !is_hovered {
                     leave_cb = cpu_node.on_mouse_leave.clone();
                 }
-                if enter_triggered {
+                if !was_hovered && is_hovered {
                     enter_cb = cpu_node.on_mouse_enter.clone();
                 }
             }

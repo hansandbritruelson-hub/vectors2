@@ -1,5 +1,6 @@
 use crate::web_bindings::{
-    get_window, GpuBindGroup, GpuBindGroupDescriptor, GpuBindGroupEntry, GpuBindGroupLayout,
+    get_window, request_render_frame, GpuBindGroup, GpuBindGroupDescriptor, GpuBindGroupEntry,
+    GpuBindGroupLayout,
     GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBuffer, GpuBufferBindingLayout,
     GpuBufferBindingType, GpuBufferDescriptor, GpuCanvasContext, GpuColorTargetState,
     GpuComputePassEncoder, GpuComputePipeline, GpuDevice, GpuExtent3D, GpuFragmentState,
@@ -708,6 +709,13 @@ impl FlexRenderer {
 
         if !self.engine.borrow().is_dirty() {
             // log("Render: skipping, no dirty");
+            return;
+        }
+
+        // Avoid submitting a new render/hit-test cycle while previous hit-test readback is active.
+        if self.hit_test_readback_in_progress.get() || self.readback_in_progress.get() {
+            // Keep the frame pump alive while paused; mark_dirty won't re-request while already dirty.
+            request_render_frame();
             return;
         }
         // crate::log("--- FRAME START ---");
@@ -1472,7 +1480,6 @@ impl FlexRenderer {
             let array_buffer = hit_test_read_buf.get_mapped_range();
             let uint32_array = js_sys::Uint32Array::new(&array_buffer);
             let any_change = uint32_array.get_index(1);
-            let cpu_needed = uint32_array.get_index(2);
             hit_test_read_buf.unmap();
             hit_test_flag.set(false);
 
@@ -1529,15 +1536,9 @@ impl FlexRenderer {
                 gpu_nodes.push(unsafe { node.assume_init() });
             }
 
-            let callbacks = {
-                let mut e = engine.borrow_mut();
-                if cpu_needed != 0 {
-                    e.process_hover_from_gpu_readback(gpu_nodes)
-                } else {
-                    e.sync_hover_state_from_gpu_readback(gpu_nodes);
-                    Vec::new()
-                }
-            };
+            let callbacks = engine
+                .borrow_mut()
+                .process_hover_from_gpu_readback(gpu_nodes);
 
             for (cb, event) in callbacks {
                 cb(event);
