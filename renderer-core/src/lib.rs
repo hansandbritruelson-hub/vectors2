@@ -488,9 +488,22 @@ pub struct GpuNode {
     // --- Positioning ---
     pub top_offset: f32,
     pub left_offset: f32,
+    pub right_offset: f32,
+    pub bottom_offset: f32,
     pub z_index: f32,
-    pub position_mode: u32,   // 0 = Relative, 1 = Absolute
-    pub flex_direction: u32,  // 0 = Row, 1 = Column
+    pub fixed_width_unit: u32,  // 0 = auto/unset
+    pub fixed_height_unit: u32, // 0 = auto/unset
+    pub min_width_unit: u32,
+    pub max_width_unit: u32, // 0 = none
+    pub min_height_unit: u32,
+    pub max_height_unit: u32, // 0 = none
+    pub top_offset_unit: u32,
+    pub left_offset_unit: u32,
+    pub right_offset_unit: u32,
+    pub bottom_offset_unit: u32,
+    pub z_index_specified: u32, // 0 = inherit/default, 1 = explicitly set
+    pub position_mode: u32,     // 0 = Relative, 1 = Absolute
+    pub flex_direction: u32,    // 0 = Row, 1 = Column
     pub justify_content: u32, // 0 = flex-start, 1 = center, 2 = flex-end, 3 = space-between, 4 = space-around, 5 = space-evenly
     pub align_items: u32,     // 0 = stretch, 1 = flex-start, 2 = center, 3 = flex-end
 
@@ -579,7 +592,7 @@ pub struct GpuNode {
 
 #[test]
 fn test_gpu_node_size() {
-    assert_eq!(std::mem::size_of::<GpuNode>(), 320);
+    assert_eq!(std::mem::size_of::<GpuNode>(), 372);
 }
 
 impl GpuNode {
@@ -612,7 +625,20 @@ impl GpuNode {
             font_style: 0,
             top_offset: 0.0,
             left_offset: 0.0,
+            right_offset: 0.0,
+            bottom_offset: 0.0,
             z_index: 0.0,
+            fixed_width_unit: 0,
+            fixed_height_unit: 0,
+            min_width_unit: 0,
+            max_width_unit: 0,
+            min_height_unit: 0,
+            max_height_unit: 0,
+            top_offset_unit: 0,
+            left_offset_unit: 0,
+            right_offset_unit: 0,
+            bottom_offset_unit: 0,
+            z_index_specified: 0,
             position_mode: 0,
             flex_direction: 0,
             justify_content: 0,
@@ -1461,6 +1487,40 @@ impl FlexEngine {
         (a << 24) | (b << 16) | (g << 8) | r
     }
 
+    fn serialize_length(
+        dest: &mut Vec<u32>,
+        val: &StyleValue,
+        default_value: f32,
+        default_unit: u32,
+    ) {
+        match val {
+            StyleValue::Px(v) => {
+                dest.push(v.to_bits());
+                dest.push(UNIT_PX);
+            }
+            StyleValue::Percent(v) => {
+                dest.push(v.to_bits());
+                dest.push(UNIT_PERCENT);
+            }
+            StyleValue::Vh(v) => {
+                dest.push(v.to_bits());
+                dest.push(UNIT_VH);
+            }
+            StyleValue::Vw(v) => {
+                dest.push(v.to_bits());
+                dest.push(UNIT_VW);
+            }
+            StyleValue::Auto => {
+                dest.push(0f32.to_bits());
+                dest.push(0);
+            }
+            _ => {
+                dest.push(default_value.to_bits());
+                dest.push(default_unit);
+            }
+        }
+    }
+
     /// Serializes a single CSS property into `class_defs`.
     /// Format: [prop_id: u32] [value data: variable u32s depending on property]
     /// Serializes a single CSS property into the provided buffer.
@@ -1486,77 +1546,27 @@ impl FlexEngine {
             }
             "width" => {
                 dest.push(PROP_WIDTH);
-                match val {
-                    StyleValue::Px(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                    StyleValue::Percent(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PERCENT);
-                    }
-                    _ => {
-                        dest.push(0f32.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "height" => {
                 dest.push(PROP_HEIGHT);
-                match val {
-                    StyleValue::Px(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                    StyleValue::Percent(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PERCENT);
-                    }
-                    _ => {
-                        dest.push(0f32.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "min-width" => {
                 dest.push(PROP_MIN_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "max-width" => {
                 dest.push(PROP_MAX_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push((-1.0f32).to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "min-height" => {
                 dest.push(PROP_MIN_HEIGHT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "max-height" => {
                 dest.push(PROP_MAX_HEIGHT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push((-1.0f32).to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "flex-direction" => {
                 dest.push(PROP_FLEX_DIRECTION);
@@ -1612,29 +1622,19 @@ impl FlexEngine {
             }
             "top" => {
                 dest.push(PROP_TOP);
-                match val {
-                    StyleValue::Px(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                    _ => {
-                        dest.push(0f32.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "left" => {
                 dest.push(PROP_LEFT);
-                match val {
-                    StyleValue::Px(v) => {
-                        dest.push(v.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                    _ => {
-                        dest.push(0f32.to_bits());
-                        dest.push(UNIT_PX);
-                    }
-                }
+                Self::serialize_length(dest, val, 0.0, 0);
+            }
+            "right" => {
+                dest.push(PROP_RIGHT);
+                Self::serialize_length(dest, val, 0.0, 0);
+            }
+            "bottom" => {
+                dest.push(PROP_BOTTOM);
+                Self::serialize_length(dest, val, 0.0, 0);
             }
             "z-index" => {
                 dest.push(PROP_Z_INDEX);
@@ -1646,123 +1646,51 @@ impl FlexEngine {
             }
             "padding-top" => {
                 dest.push(PROP_PADDING_TOP);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "padding-right" => {
                 dest.push(PROP_PADDING_RIGHT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "padding-bottom" => {
                 dest.push(PROP_PADDING_BOTTOM);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "padding-left" => {
                 dest.push(PROP_PADDING_LEFT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "margin-top" => {
                 dest.push(PROP_MARGIN_TOP);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "margin-right" => {
                 dest.push(PROP_MARGIN_RIGHT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "margin-bottom" => {
                 dest.push(PROP_MARGIN_BOTTOM);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "margin-left" => {
                 dest.push(PROP_MARGIN_LEFT);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "border-top-width" => {
                 dest.push(PROP_BORDER_TOP_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "border-right-width" => {
                 dest.push(PROP_BORDER_RIGHT_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "border-bottom-width" => {
                 dest.push(PROP_BORDER_BOTTOM_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "border-left-width" => {
                 dest.push(PROP_BORDER_LEFT_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "border-color-top" => {
                 dest.push(PROP_BORDER_COLOR_TOP);
@@ -1798,23 +1726,11 @@ impl FlexEngine {
             }
             "outline-width" => {
                 dest.push(PROP_OUTLINE_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "outline-offset" => {
                 dest.push(PROP_OUTLINE_OFFSET);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "outline-color-top" => {
                 dest.push(PROP_OUTLINE_COLOR_TOP);
@@ -1850,43 +1766,19 @@ impl FlexEngine {
             }
             "box-shadow-h-offset" => {
                 dest.push(PROP_BOX_SHADOW_H_OFFSET);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "box-shadow-v-offset" => {
                 dest.push(PROP_BOX_SHADOW_V_OFFSET);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "box-shadow-blur" => {
                 dest.push(PROP_BOX_SHADOW_BLUR);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "box-shadow-spread" => {
                 dest.push(PROP_BOX_SHADOW_SPREAD);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             "box-shadow-color" => {
                 dest.push(PROP_BOX_SHADOW_COLOR);
@@ -1906,6 +1798,14 @@ impl FlexEngine {
                     StyleValue::Em(v) => {
                         dest.push(v.to_bits());
                         dest.push(UNIT_EM);
+                    }
+                    StyleValue::Vh(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VH);
+                    }
+                    StyleValue::Vw(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VW);
                     }
                     _ => {
                         dest.push(24f32.to_bits());
@@ -1945,6 +1845,14 @@ impl FlexEngine {
                         dest.push(v.to_bits());
                         dest.push(UNIT_EM);
                     }
+                    StyleValue::Vh(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VH);
+                    }
+                    StyleValue::Vw(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VW);
+                    }
                     _ => {
                         dest.push(0f32.to_bits());
                         dest.push(UNIT_PX);
@@ -1961,6 +1869,14 @@ impl FlexEngine {
                     StyleValue::Em(v) => {
                         dest.push(v.to_bits());
                         dest.push(UNIT_EM);
+                    }
+                    StyleValue::Vh(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VH);
+                    }
+                    StyleValue::Vw(v) => {
+                        dest.push(v.to_bits());
+                        dest.push(UNIT_VW);
                     }
                     _ => {
                         dest.push(0f32.to_bits());
@@ -2016,13 +1932,7 @@ impl FlexEngine {
             }
             "stroke-width" => {
                 dest.push(PROP_STROKE_WIDTH);
-                if let StyleValue::Px(v) = val {
-                    dest.push(v.to_bits());
-                    dest.push(UNIT_PX);
-                } else {
-                    dest.push(0f32.to_bits());
-                    dest.push(UNIT_PX);
-                }
+                Self::serialize_length(dest, val, 0.0, UNIT_PX);
             }
             _ => {
                 panic!(

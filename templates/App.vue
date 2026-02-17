@@ -55,8 +55,8 @@
 
 <style>
 .app-root {
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   flex-direction: column;
   background-color: #0c0c0c;
   

@@ -27,12 +27,20 @@
 
     <div class="main-content">
       <div class="top-bar">
-        <div 
-          class="menu-item"
-          @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); }"
-          @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); }"
+        <div
+          class="file-menu-container"
+          @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); set_file_menu_open.set(true); }"
+          @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); set_file_menu_open.set(false); }"
         >
-          File
+          <div class="menu-item file-menu-trigger">
+            File
+          </div>
+          <div class="file-menu-dropdown" v-if="file_menu_open == true">
+            <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command new file\"); }">New File</div>
+            <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command open\"); }">Open...</div>
+            <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command save\"); }">Save</div>
+            <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command export\"); }">Export</div>
+          </div>
         </div>
         <div class="menu-item">Edit</div>
         <div class="menu-item">View</div>
@@ -105,6 +113,7 @@
 
 <script>
   use crate::design::Design;
+  let (file_menu_open, set_file_menu_open) = crate::signals::create_signal(false);
 
   pub struct Props {
     pub design: Rc<Design>
@@ -168,6 +177,12 @@
   padding: 0 16px;
 }
 
+.file-menu-container {
+  position: relative;
+  height: 100%;
+  justify-content: center;
+}
+
 .menu-item {
   padding: 0 12px;
   height: 100%;
@@ -176,9 +191,40 @@
   color: #bbb;
 }
 
+.file-menu-trigger {
+  z-index: 5000;
+}
+
 .menu-item:hover {
   color: #fff;
   background-color: #333;
+}
+
+.file-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 170px;
+  flex-direction: column;
+  background-color: #242424;
+  border-width: 1px;
+  border-color: #3d3d3d;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  z-index: 9000;
+  padding: 4px 0;
+}
+
+.file-menu-command {
+  height: 30px;
+  justify-content: center;
+  padding: 0 12px;
+  color: #d0d0d0;
+  font-size: 12px;
+}
+
+.file-menu-command:hover {
+  background-color: #3a3a3a;
+  color: #ffffff;
 }
 
 .project-title {

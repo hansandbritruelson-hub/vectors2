@@ -19,7 +19,20 @@ struct Node {
     
     top_offset: f32,
     left_offset: f32,
+    right_offset: f32,
+    bottom_offset: f32,
     z_index: f32,
+    fixed_width_unit: u32,
+    fixed_height_unit: u32,
+    min_width_unit: u32,
+    max_width_unit: u32,
+    min_height_unit: u32,
+    max_height_unit: u32,
+    top_offset_unit: u32,
+    left_offset_unit: u32,
+    right_offset_unit: u32,
+    bottom_offset_unit: u32,
+    z_index_specified: u32,
     position_mode: u32,
     flex_direction: u32,
     justify_content: u32,
@@ -294,30 +307,95 @@ fn width_bottom_up(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 }
 
-fn clamp_width(id: u32, w: f32) -> f32 {
+fn resolve_length_horizontal(value: f32, unit: u32, percent_base: f32) -> f32 {
+    switch (unit) {
+        case UNIT_PX: { return value; }
+        case UNIT_PERCENT: { return percent_base * value * 0.01; }
+        case UNIT_VW: { return uniforms.screen_width * value * 0.01; }
+        case UNIT_VH: { return uniforms.screen_height * value * 0.01; }
+        default: { return value; }
+    }
+}
+
+fn resolve_length_vertical(value: f32, unit: u32, percent_base: f32) -> f32 {
+    switch (unit) {
+        case UNIT_PX: { return value; }
+        case UNIT_PERCENT: { return percent_base * value * 0.01; }
+        case UNIT_VH: { return uniforms.screen_height * value * 0.01; }
+        case UNIT_VW: { return uniforms.screen_width * value * 0.01; }
+        default: { return value; }
+    }
+}
+
+fn resolve_min_width(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].min_width_unit == 0u) {
+        return 0.0;
+    }
+    return max(0.0, resolve_length_horizontal(nodes[id].min_width, nodes[id].min_width_unit, percent_base));
+}
+
+fn resolve_max_width(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].max_width_unit == 0u) {
+        return -1.0;
+    }
+    return max(0.0, resolve_length_horizontal(nodes[id].max_width, nodes[id].max_width_unit, percent_base));
+}
+
+fn resolve_min_height(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].min_height_unit == 0u) {
+        return 0.0;
+    }
+    return max(0.0, resolve_length_vertical(nodes[id].min_height, nodes[id].min_height_unit, percent_base));
+}
+
+fn resolve_max_height(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].max_height_unit == 0u) {
+        return -1.0;
+    }
+    return max(0.0, resolve_length_vertical(nodes[id].max_height, nodes[id].max_height_unit, percent_base));
+}
+
+fn resolve_specified_width(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].fixed_width_unit == 0u) {
+        return -1.0;
+    }
+    return max(0.0, resolve_length_horizontal(nodes[id].fixed_width, nodes[id].fixed_width_unit, percent_base));
+}
+
+fn resolve_specified_height(id: u32, percent_base: f32) -> f32 {
+    if (nodes[id].fixed_height_unit == 0u) {
+        return -1.0;
+    }
+    return max(0.0, resolve_length_vertical(nodes[id].fixed_height, nodes[id].fixed_height_unit, percent_base));
+}
+
+fn clamp_width(id: u32, w: f32, percent_base: f32) -> f32 {
     var clamped = max(0.0, w);
-    clamped = max(clamped, nodes[id].min_width);
-    if (nodes[id].max_width >= 0.0) {
-        clamped = min(clamped, nodes[id].max_width);
+    clamped = max(clamped, resolve_min_width(id, percent_base));
+    let max_width = resolve_max_width(id, percent_base);
+    if (max_width >= 0.0) {
+        clamped = min(clamped, max_width);
     }
     return clamped;
 }
 
 fn get_negotiated_outer_width(id: u32) -> f32 {
     var base_w = 0.0;
-    if (nodes[id].fixed_width >= 0.0) {
-        base_w = nodes[id].fixed_width;
+    let specified = resolve_specified_width(id, uniforms.screen_width);
+    if (specified >= 0.0) {
+        base_w = specified;
     } else {
         base_w = nodes[id].natural_content_width;
     }
-    return clamp_width(id, base_w) + nodes[id].margin_left + nodes[id].margin_right;
+    return clamp_width(id, base_w, uniforms.screen_width) + nodes[id].margin_left + nodes[id].margin_right;
 }
 
-fn clamp_height(id: u32, h: f32) -> f32 {
+fn clamp_height(id: u32, h: f32, percent_base: f32) -> f32 {
     var clamped = max(0.0, h);
-    clamped = max(clamped, nodes[id].min_height);
-    if (nodes[id].max_height >= 0.0) {
-        clamped = min(clamped, nodes[id].max_height);
+    clamped = max(clamped, resolve_min_height(id, percent_base));
+    let max_height = resolve_max_height(id, percent_base);
+    if (max_height >= 0.0) {
+        clamped = min(clamped, max_height);
     }
     return clamped;
 }
@@ -373,32 +451,64 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     let parent_id = nodes[id].parent_index;
     if (parent_id == id) {
-        nodes[id].final_width = clamp_width(id, uniforms.screen_width);
+        let root_specified = resolve_specified_width(id, uniforms.screen_width);
+        let root_width = select(uniforms.screen_width, root_specified, root_specified >= 0.0);
+        nodes[id].final_width = clamp_width(id, root_width, uniforms.screen_width);
         atomicStore(&nodes[id].signals_finished, 1u);
     } else {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
-            
+            let available_parent_inner_width = max(
+                0.0,
+                nodes[parent_id].final_width
+                    - nodes[parent_id].padding_left
+                    - nodes[parent_id].padding_right
+                    - nodes[parent_id].border_left_width
+                    - nodes[parent_id].border_right_width,
+            );
+            let specified_width = resolve_specified_width(id, available_parent_inner_width);
+
             if (nodes[id].position_mode == 1u) {
-                // Absolute: Use negotiated width (excluding its own margin from the final_width property, 
-                // because absolute positioning usually defines the box size via width)
-                if (nodes[id].fixed_width >= 0.0) {
-                    nodes[id].final_width = nodes[id].fixed_width;
+                let has_left = nodes[id].left_offset_unit != 0u;
+                let has_right = nodes[id].right_offset_unit != 0u;
+                let left = select(
+                    0.0,
+                    resolve_length_horizontal(nodes[id].left_offset, nodes[id].left_offset_unit, available_parent_inner_width),
+                    has_left,
+                );
+                let right = select(
+                    0.0,
+                    resolve_length_horizontal(nodes[id].right_offset, nodes[id].right_offset_unit, available_parent_inner_width),
+                    has_right,
+                );
+
+                if (specified_width >= 0.0) {
+                    nodes[id].final_width = specified_width;
+                } else if (has_left && has_right) {
+                    nodes[id].final_width = max(
+                        0.0,
+                        available_parent_inner_width
+                            - left
+                            - right
+                            - nodes[id].margin_left
+                            - nodes[id].margin_right,
+                    );
                 } else {
-                    nodes[id].final_width = nodes[id].natural_content_width;
+                    nodes[id].final_width = max(
+                        0.0,
+                        nodes[id].natural_content_width - nodes[id].margin_left - nodes[id].margin_right,
+                    );
                 }
             } else {
                 // Relative/Flex
-                let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
-                
                 if (nodes[parent_id].flex_direction == 1u) { // Column
-                    if (nodes[id].fixed_width >= 0.0) {
-                        nodes[id].final_width = nodes[id].fixed_width;
+                    if (specified_width >= 0.0) {
+                        nodes[id].final_width = specified_width;
                     } else {
                         nodes[id].final_width = max(0.0, available_parent_inner_width - nodes[id].margin_left - nodes[id].margin_right);
                     }
                 } else { // Row
-                    if (nodes[id].fixed_width >= 0.0) {
-                        nodes[id].final_width = nodes[id].fixed_width;
+                    if (specified_width >= 0.0) {
+                        nodes[id].final_width = specified_width;
                     } else {
                         let parent_natural_inner = max(0.0, nodes[parent_id].natural_content_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
                         let my_negotiated_outer = get_negotiated_outer_width(id);
@@ -413,7 +523,7 @@ fn width_top_down(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            nodes[id].final_width = clamp_width(id, nodes[id].final_width);
+            nodes[id].final_width = clamp_width(id, nodes[id].final_width, available_parent_inner_width);
             atomicStore(&nodes[id].signals_finished, 1u);
         }
     }
@@ -456,8 +566,9 @@ fn process_node_height(id: u32) {
         return;
     }
 
-    if (nodes[id].fixed_height >= 0.0) {
-        nodes[id].desired_height = clamp_height(id, nodes[id].fixed_height);
+    let specified_height = resolve_specified_height(id, uniforms.screen_height);
+    if (specified_height >= 0.0 && nodes[id].fixed_height_unit != UNIT_PERCENT) {
+        nodes[id].desired_height = clamp_height(id, specified_height, uniforms.screen_height);
         return;
     }
 
@@ -487,7 +598,7 @@ fn process_node_height(id: u32) {
         }
         nodes[id].desired_height = result_height + nodes[id].padding_top + nodes[id].padding_bottom + border_v;
     }
-    nodes[id].desired_height = clamp_height(id, nodes[id].desired_height);
+    nodes[id].desired_height = clamp_height(id, nodes[id].desired_height, uniforms.screen_height);
 }
 
 fn justify_distribution(mode: u32, free_space: f32, item_count: u32) -> vec2<f32> {
@@ -553,23 +664,78 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (parent_id == id) {
         nodes[id].final_x = 0.0;
         nodes[id].final_y = 0.0;
-        nodes[id].final_height = clamp_height(id, uniforms.screen_height); 
+        let root_specified_height = resolve_specified_height(id, uniforms.screen_height);
+        let root_height = select(uniforms.screen_height, root_specified_height, root_specified_height >= 0.0);
+        nodes[id].final_height = clamp_height(id, root_height, uniforms.screen_height);
         atomicStore(&nodes[id].signals_finished, 1u);
     } else {
         if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
-            
+            let parent_inner_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width;
+            let parent_inner_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width;
+            let available_parent_inner_width = max(
+                0.0,
+                nodes[parent_id].final_width
+                    - nodes[parent_id].padding_left
+                    - nodes[parent_id].padding_right
+                    - nodes[parent_id].border_left_width
+                    - nodes[parent_id].border_right_width,
+            );
+            let available_parent_inner_height = max(
+                0.0,
+                nodes[parent_id].final_height
+                    - nodes[parent_id].padding_top
+                    - nodes[parent_id].padding_bottom
+                    - nodes[parent_id].border_top_width
+                    - nodes[parent_id].border_bottom_width,
+            );
+            if (nodes[id].z_index_specified == 0u) {
+                nodes[id].z_index = nodes[parent_id].z_index;
+            }
+
             if (nodes[id].position_mode == 1u) { // Absolute
-                 nodes[id].final_height = clamp_height(id, nodes[id].desired_height);
-                 nodes[id].final_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width + nodes[id].left_offset + nodes[id].margin_left;
-                 nodes[id].final_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width + nodes[id].top_offset + nodes[id].margin_top;
+                let has_left = nodes[id].left_offset_unit != 0u;
+                let has_right = nodes[id].right_offset_unit != 0u;
+                let has_top = nodes[id].top_offset_unit != 0u;
+                let has_bottom = nodes[id].bottom_offset_unit != 0u;
+                let left = select(0.0, resolve_length_horizontal(nodes[id].left_offset, nodes[id].left_offset_unit, available_parent_inner_width), has_left);
+                let right = select(0.0, resolve_length_horizontal(nodes[id].right_offset, nodes[id].right_offset_unit, available_parent_inner_width), has_right);
+                let top = select(0.0, resolve_length_vertical(nodes[id].top_offset, nodes[id].top_offset_unit, available_parent_inner_height), has_top);
+                let bottom = select(0.0, resolve_length_vertical(nodes[id].bottom_offset, nodes[id].bottom_offset_unit, available_parent_inner_height), has_bottom);
+
+                let specified_height = resolve_specified_height(id, available_parent_inner_height);
+                if (specified_height >= 0.0) {
+                    nodes[id].final_height = specified_height;
+                } else if (has_top && has_bottom) {
+                    nodes[id].final_height = max(
+                        0.0,
+                        available_parent_inner_height - top - bottom - nodes[id].margin_top - nodes[id].margin_bottom,
+                    );
+                } else {
+                    nodes[id].final_height = nodes[id].desired_height;
+                }
+                nodes[id].final_height = clamp_height(id, nodes[id].final_height, available_parent_inner_height);
+
+                if (has_left) {
+                    nodes[id].final_x = parent_inner_x + left + nodes[id].margin_left;
+                } else if (has_right) {
+                    nodes[id].final_x = parent_inner_x + available_parent_inner_width - right - nodes[id].final_width - nodes[id].margin_right;
+                } else {
+                    nodes[id].final_x = parent_inner_x + nodes[id].margin_left;
+                }
+
+                if (has_top) {
+                    nodes[id].final_y = parent_inner_y + top + nodes[id].margin_top;
+                } else if (has_bottom) {
+                    nodes[id].final_y = parent_inner_y + available_parent_inner_height - bottom - nodes[id].final_height - nodes[id].margin_bottom;
+                } else {
+                    nodes[id].final_y = parent_inner_y + nodes[id].margin_top;
+                }
             } else { // Relative
-                let parent_inner_x = nodes[parent_id].final_x + nodes[parent_id].padding_left + nodes[parent_id].border_left_width;
-                let parent_inner_y = nodes[parent_id].final_y + nodes[parent_id].padding_top + nodes[parent_id].border_top_width;
                 let start = nodes[parent_id].child_start_index;
                 let end = start + nodes[parent_id].child_count;
+                let specified_height = resolve_specified_height(id, available_parent_inner_height);
 
                 if (nodes[parent_id].flex_direction == 1u) { // Column
-                    let available_parent_inner_height = max(0.0, nodes[parent_id].final_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
                     let parent_natural_inner_height = max(0.0, nodes[parent_id].desired_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
                     
                     var ratio = 1.0;
@@ -577,9 +743,13 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                         ratio = available_parent_inner_height / parent_natural_inner_height;
                     }
                     
-                    let my_outer_main = (nodes[id].desired_height + nodes[id].margin_top + nodes[id].margin_bottom) * ratio;
-                    nodes[id].final_height = max(0.0, my_outer_main - nodes[id].margin_top - nodes[id].margin_bottom);
-                    nodes[id].final_height = clamp_height(id, nodes[id].final_height);
+                    if (specified_height >= 0.0) {
+                        nodes[id].final_height = specified_height;
+                    } else {
+                        let my_outer_main = (nodes[id].desired_height + nodes[id].margin_top + nodes[id].margin_bottom) * ratio;
+                        nodes[id].final_height = max(0.0, my_outer_main - nodes[id].margin_top - nodes[id].margin_bottom);
+                    }
+                    nodes[id].final_height = clamp_height(id, nodes[id].final_height, available_parent_inner_height);
 
                     var relative_count = 0u;
                     var total_outer_main = 0.0;
@@ -602,16 +772,14 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
                     nodes[id].final_y = parent_inner_y + main_distribution.x + main_before + nodes[id].margin_top;
 
-                    let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
                     let my_outer_cross = nodes[id].final_width + nodes[id].margin_left + nodes[id].margin_right;
                     let free_cross = max(0.0, available_parent_inner_width - my_outer_cross);
                     let cross_shift = align_offset(nodes[parent_id].align_items, free_cross);
                     nodes[id].final_x = parent_inner_x + cross_shift + nodes[id].margin_left;
                     
                 } else { // Row
-                    let available_parent_inner_height = max(0.0, nodes[parent_id].final_height - nodes[parent_id].padding_top - nodes[parent_id].padding_bottom - nodes[parent_id].border_top_width - nodes[parent_id].border_bottom_width);
-                    if (nodes[id].fixed_height >= 0.0) {
-                        nodes[id].final_height = nodes[id].fixed_height;
+                    if (specified_height >= 0.0) {
+                        nodes[id].final_height = specified_height;
                     } else {
                         if (nodes[parent_id].align_items == 0u) { // stretch
                             nodes[id].final_height = max(0.0, available_parent_inner_height - nodes[id].margin_top - nodes[id].margin_bottom);
@@ -619,12 +787,10 @@ fn final_layout(@builtin(global_invocation_id) global_id: vec3<u32>) {
                             nodes[id].final_height = max(0.0, nodes[id].desired_height);
                         }
                     }
-                    nodes[id].final_height = clamp_height(id, nodes[id].final_height);
+                    nodes[id].final_height = clamp_height(id, nodes[id].final_height, available_parent_inner_height);
 
                     var relative_count = 0u;
                     var total_outer_main = 0.0;
-                    let available_parent_inner_width = max(0.0, nodes[parent_id].final_width - nodes[parent_id].padding_left - nodes[parent_id].padding_right - nodes[parent_id].border_left_width - nodes[parent_id].border_right_width);
-
                     for (var i = start; i < end; i = i + 1u) {
                         if (nodes[i].position_mode == 0u && (nodes[i].flags & 1u) != 0u) {
                             total_outer_main += nodes[i].final_width + nodes[i].margin_left + nodes[i].margin_right;
@@ -698,9 +864,8 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].fixed_width = val; }
-                    else if (unit == UNIT_PERCENT) { /* Handle percent width eventually */ }
-                    else { nodes[id].fixed_width = -1.0; } 
+                    nodes[id].fixed_width = val;
+                    nodes[id].fixed_width_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
@@ -709,44 +874,48 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].fixed_height = val; }
-                    else { nodes[id].fixed_height = -1.0; }
+                    nodes[id].fixed_height = val;
+                    nodes[id].fixed_height_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
             }
             case PROP_MIN_WIDTH: {
                 if (apply) {
-                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let val = max(0.0, bitcast<f32>(get_style_val(buffer_selector, pos)));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].min_width = max(0.0, val); }
+                    nodes[id].min_width = val;
+                    nodes[id].min_width_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
             }
             case PROP_MAX_WIDTH: {
                 if (apply) {
-                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let val = max(0.0, bitcast<f32>(get_style_val(buffer_selector, pos)));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].max_width = val; }
+                    nodes[id].max_width = val;
+                    nodes[id].max_width_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
             }
             case PROP_MIN_HEIGHT: {
                 if (apply) {
-                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let val = max(0.0, bitcast<f32>(get_style_val(buffer_selector, pos)));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].min_height = max(0.0, val); }
+                    nodes[id].min_height = val;
+                    nodes[id].min_height_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
             }
             case PROP_MAX_HEIGHT: {
                 if (apply) {
-                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let val = max(0.0, bitcast<f32>(get_style_val(buffer_selector, pos)));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].max_height = val; }
+                    nodes[id].max_height = val;
+                    nodes[id].max_height_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
@@ -775,7 +944,8 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].top_offset = val; }
+                    nodes[id].top_offset = val;
+                    nodes[id].top_offset_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
@@ -784,13 +954,37 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].left_offset = val; }
+                    nodes[id].left_offset = val;
+                    nodes[id].left_offset_unit = unit;
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_RIGHT: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    nodes[id].right_offset = val;
+                    nodes[id].right_offset_unit = unit;
+                }
+                pos = pos + 2u;
+                break;
+            }
+            case PROP_BOTTOM: {
+                if (apply) {
+                    let val = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    let unit = get_style_val(buffer_selector, pos + 1u);
+                    nodes[id].bottom_offset = val;
+                    nodes[id].bottom_offset_unit = unit;
                 }
                 pos = pos + 2u;
                 break;
             }
             case PROP_Z_INDEX: {
-                if (apply) { nodes[id].z_index = bitcast<f32>(get_style_val(buffer_selector, pos)); }
+                if (apply) {
+                    nodes[id].z_index = bitcast<f32>(get_style_val(buffer_selector, pos));
+                    nodes[id].z_index_specified = 1u;
+                }
                 pos = pos + 1u;
                 break;
             }
@@ -798,7 +992,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].padding_top = val; }
+                    nodes[id].padding_top = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -807,7 +1001,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].padding_right = val; }
+                    nodes[id].padding_right = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -816,7 +1010,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].padding_bottom = val; }
+                    nodes[id].padding_bottom = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -825,7 +1019,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].padding_left = val; }
+                    nodes[id].padding_left = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -834,7 +1028,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].margin_top = val; }
+                    nodes[id].margin_top = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -843,7 +1037,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].margin_right = val; }
+                    nodes[id].margin_right = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -852,7 +1046,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].margin_bottom = val; }
+                    nodes[id].margin_bottom = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -861,7 +1055,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].margin_left = val; }
+                    nodes[id].margin_left = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -870,7 +1064,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].border_top_width = val; }
+                    nodes[id].border_top_width = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -879,7 +1073,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].border_right_width = val; }
+                    nodes[id].border_right_width = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -888,7 +1082,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].border_bottom_width = val; }
+                    nodes[id].border_bottom_width = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -897,7 +1091,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].border_left_width = val; }
+                    nodes[id].border_left_width = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -926,7 +1120,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].outline_width = val; }
+                    nodes[id].outline_width = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -935,7 +1129,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].outline_offset = val; }
+                    nodes[id].outline_offset = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -964,7 +1158,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].box_shadow_h_offset = val; }
+                    nodes[id].box_shadow_h_offset = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -973,7 +1167,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].box_shadow_v_offset = val; }
+                    nodes[id].box_shadow_v_offset = resolve_length_vertical(val, unit, uniforms.screen_height);
                 }
                 pos = pos + 2u;
                 break;
@@ -982,7 +1176,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].box_shadow_blur = val; }
+                    nodes[id].box_shadow_blur = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -991,7 +1185,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].box_shadow_spread = val; }
+                    nodes[id].box_shadow_spread = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -1017,6 +1211,8 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                     let unit = get_style_val(buffer_selector, pos + 1u);
                     if (unit == UNIT_PX) { nodes[id].font_size = val; }
                     else if (unit == UNIT_EM) { nodes[id].font_size = val * nodes[id].font_size; }
+                    else if (unit == UNIT_VH) { nodes[id].font_size = uniforms.screen_height * val * 0.01; }
+                    else if (unit == UNIT_VW) { nodes[id].font_size = uniforms.screen_width * val * 0.01; }
                 }
                 pos = pos + 2u;
                 break;
@@ -1037,6 +1233,8 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                     let unit = get_style_val(buffer_selector, pos + 1u);
                     if (unit == UNIT_PX) { nodes[id].letter_spacing = val; }
                     else if (unit == UNIT_EM) { nodes[id].letter_spacing = val * nodes[id].font_size; }
+                    else if (unit == UNIT_VH) { nodes[id].letter_spacing = uniforms.screen_height * val * 0.01; }
+                    else if (unit == UNIT_VW) { nodes[id].letter_spacing = uniforms.screen_width * val * 0.01; }
                 }
                 pos = pos + 2u;
                 break;
@@ -1047,6 +1245,8 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                     let unit = get_style_val(buffer_selector, pos + 1u);
                     if (unit == UNIT_PX) { nodes[id].word_spacing = val; }
                     else if (unit == UNIT_EM) { nodes[id].word_spacing = val * nodes[id].font_size; }
+                    else if (unit == UNIT_VH) { nodes[id].word_spacing = uniforms.screen_height * val * 0.01; }
+                    else if (unit == UNIT_VW) { nodes[id].word_spacing = uniforms.screen_width * val * 0.01; }
                 }
                 pos = pos + 2u;
                 break;
@@ -1075,7 +1275,7 @@ fn apply_style_stream(id: u32, buffer_selector: u32, start_pos: u32, is_hovered:
                 if (apply) {
                     let val = bitcast<f32>(get_style_val(buffer_selector, pos));
                     let unit = get_style_val(buffer_selector, pos + 1u);
-                    if (unit == UNIT_PX) { nodes[id].stroke_width = val; }
+                    nodes[id].stroke_width = resolve_length_horizontal(val, unit, uniforms.screen_width);
                 }
                 pos = pos + 2u;
                 break;
@@ -1102,19 +1302,32 @@ fn resolve_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // 4. Default Layout Values (reset for each resolve pass)
-    nodes[id].fixed_width = -1.0;
+    nodes[id].fixed_width = 0.0;
+    nodes[id].fixed_width_unit = 0u;
     nodes[id].min_width = 0.0;
-    nodes[id].max_width = -1.0;
-    nodes[id].fixed_height = -1.0;
+    nodes[id].min_width_unit = 0u;
+    nodes[id].max_width = 0.0;
+    nodes[id].max_width_unit = 0u;
+    nodes[id].fixed_height = 0.0;
+    nodes[id].fixed_height_unit = 0u;
     nodes[id].min_height = 0.0;
-    nodes[id].max_height = -1.0;
+    nodes[id].min_height_unit = 0u;
+    nodes[id].max_height = 0.0;
+    nodes[id].max_height_unit = 0u;
     nodes[id].color_r = 0.0;
     nodes[id].color_g = 0.0;
     nodes[id].color_b = 0.0;
     nodes[id].color_a = 0.0;
     nodes[id].top_offset = 0.0;
+    nodes[id].top_offset_unit = 0u;
     nodes[id].left_offset = 0.0;
+    nodes[id].left_offset_unit = 0u;
+    nodes[id].right_offset = 0.0;
+    nodes[id].right_offset_unit = 0u;
+    nodes[id].bottom_offset = 0.0;
+    nodes[id].bottom_offset_unit = 0u;
     nodes[id].z_index = 0.0;
+    nodes[id].z_index_specified = 0u;
     nodes[id].position_mode = 0u;
     nodes[id].flex_direction = 0u;
     nodes[id].justify_content = 0u;
@@ -1198,6 +1411,10 @@ fn inherit_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     if (atomicLoad(&nodes[parent_id].signals_finished) == 1u && atomicLoad(&nodes[id].signals_finished) == 0u) {
+        if (nodes[id].z_index_specified == 0u) {
+            nodes[id].z_index = nodes[parent_id].z_index;
+        }
+
         // Basic Inheritance Heuristic: 
         // If font_size is still 24.0 (default), inherit from parent.
         if (nodes[id].font_size == 24.0) {
