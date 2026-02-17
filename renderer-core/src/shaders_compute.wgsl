@@ -135,7 +135,8 @@ struct Uniforms {
     line_height: f32,
     node_count: f32,
     leaf_count: f32,
-    _pad0: f32, _pad1: f32,
+    mouse_x: f32,
+    mouse_y: f32,
 };
 
 struct GlyphData {
@@ -1449,4 +1450,122 @@ fn inherit_styles(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         atomicStore(&nodes[id].signals_finished, 1u);
     }
+}
+
+struct HitTestResult {
+    max_z_index: atomic<i32>,
+    any_change: atomic<u32>,
+    cpu_needed: atomic<u32>,
+    _pad: u32,
+};
+
+@group(0) @binding(8) var<storage, read_write> hit_test_result: HitTestResult;
+
+var<workgroup> wg_max_z: atomic<i32>;
+
+const NODE_FLAG_VISIBLE: u32 = 1u << 0u;
+const NODE_FLAG_HOVERED: u32 = 1u << 4u;
+const NODE_FLAG_HAS_MOUSE_ENTER_LISTENER: u32 = 1u << 5u;
+const NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER: u32 = 1u << 6u;
+const NODE_FLAG_MOUSE_ENTER_TRIGGERED: u32 = 1u << 7u;
+const NODE_FLAG_MOUSE_LEAVE_TRIGGERED: u32 = 1u << 8u;
+
+fn float_to_int_z(z: f32) -> i32 {
+    return i32(z);
+}
+
+fn is_effectively_visible(node_index: u32) -> bool {
+    var current = node_index;
+    loop {
+        if ((nodes[current].flags & NODE_FLAG_VISIBLE) == 0u) {
+            return false;
+        }
+        if (current == 0u) {
+            break;
+        }
+        let parent = nodes[current].parent_index;
+        if (parent == current) {
+            break;
+        }
+        current = parent;
+    }
+    return true;
+}
+
+@compute @workgroup_size(64)
+fn hit_test_pass_1(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>) {
+    if (local_id.x == 0u) {
+        atomicStore(&wg_max_z, -2147483648);
+    }
+    workgroupBarrier();
+
+    let id = global_id.x;
+    if (id < u32(uniforms.node_count)) {
+        if (is_effectively_visible(id)) {
+            let mx = uniforms.mouse_x;
+            let my = uniforms.mouse_y;
+            if mx >= nodes[id].final_x && mx <= nodes[id].final_x + nodes[id].final_width &&
+                my >= nodes[id].final_y && my <= nodes[id].final_y + nodes[id].final_height {
+                let z_int = float_to_int_z(nodes[id].z_index);
+                atomicMax(&wg_max_z, z_int);
+            }
+        }
+    }
+    
+    workgroupBarrier();
+    
+    if (local_id.x == 0u) {
+        let local_max = atomicLoad(&wg_max_z);
+        if (local_max > -2147483648) {
+            atomicMax(&hit_test_result.max_z_index, local_max);
+        }
+    }
+}
+
+@compute @workgroup_size(64)
+fn hit_test_pass_2(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let id = global_id.x;
+    if (id >= u32(uniforms.node_count)) {
+        return;
+    }
+
+    var node_flags = nodes[id].flags;
+    let was_hovered = (node_flags & NODE_FLAG_HOVERED) != 0u;
+    var is_hovered = false;
+
+    if (is_effectively_visible(id)) {
+        let mx = uniforms.mouse_x;
+        let my = uniforms.mouse_y;
+        if mx >= nodes[id].final_x && mx <= nodes[id].final_x + nodes[id].final_width &&
+            my >= nodes[id].final_y && my <= nodes[id].final_y + nodes[id].final_height {
+            let max_z = atomicLoad(&hit_test_result.max_z_index);
+            if float_to_int_z(nodes[id].z_index) == max_z {
+                is_hovered = true;
+            }
+        }
+    }
+
+    node_flags &= ~(NODE_FLAG_MOUSE_ENTER_TRIGGERED | NODE_FLAG_MOUSE_LEAVE_TRIGGERED);
+
+    if (is_hovered != was_hovered) {
+        atomicStore(&hit_test_result.any_change, 1u);
+        if (is_hovered) {
+            node_flags |= NODE_FLAG_HOVERED;
+        } else {
+            node_flags &= ~NODE_FLAG_HOVERED;
+        }
+
+        let has_enter = (node_flags & NODE_FLAG_HAS_MOUSE_ENTER_LISTENER) != 0u;
+        let has_leave = (node_flags & NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER) != 0u;
+        if (is_hovered && has_enter) {
+            node_flags |= NODE_FLAG_MOUSE_ENTER_TRIGGERED;
+            atomicStore(&hit_test_result.cpu_needed, 1u);
+        }
+        if ((!is_hovered) && has_leave) {
+            node_flags |= NODE_FLAG_MOUSE_LEAVE_TRIGGERED;
+            atomicStore(&hit_test_result.cpu_needed, 1u);
+        }
+    }
+
+    nodes[id].flags = node_flags;
 }

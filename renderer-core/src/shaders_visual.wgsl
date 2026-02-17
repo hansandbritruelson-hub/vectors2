@@ -172,14 +172,32 @@ struct VertexOutput {
     @location(8) @interpolate(flat) instance_index: u32,
 };
 
+fn is_effectively_visible(node_index: u32) -> bool {
+    var current = node_index;
+    loop {
+        if ((nodes[current].flags & 1u) == 0u) {
+            return false;
+        }
+        if (current == 0u) {
+            break;
+        }
+        let parent = nodes[current].parent_index;
+        if (parent == current) {
+            break;
+        }
+        current = parent;
+    }
+    return true;
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VertexOutput {
     let node = nodes[instance_index];
     
     // Visibility Check
-    if ((node.flags & 1u) == 0u) {
+    if (!is_effectively_visible(instance_index)) {
         var out: VertexOutput;
-        out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0); // Degenerate
+        out.position = vec4<f32>(2.0, 2.0, 0.0, 1.0); // Offscreen
         return out;
     }
 
@@ -331,9 +349,9 @@ fn vs_text(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) in
     let node = nodes[char.node_index];
     
     // Visibility Check
-    if ((node.flags & 1u) == 0u) {
+    if (!is_effectively_visible(char.node_index)) {
         var out: VertexOutput;
-        out.position = vec4<f32>(0.0, 0.0, 0.0, 0.0); // Degenerate
+        out.position = vec4<f32>(2.0, 2.0, 0.0, 1.0); // Offscreen
         return out;
     }
 

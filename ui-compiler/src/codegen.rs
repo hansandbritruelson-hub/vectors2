@@ -259,11 +259,14 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
     // Check for special directives first (v-if, v-for)
     let mut v_if = None;
     let mut v_for = None;
+    let mut v_show = None;
     for attr in &el.attributes {
         if attr.name == "v-if" {
             v_if = Some(attr.value.clone());
         } else if attr.name == "v-for" {
             v_for = Some(attr.value.clone());
+        } else if attr.name == "v-show" {
+            v_show = Some(attr.value.clone());
         }
     }
 
@@ -282,7 +285,9 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
             quote! { parent.unwrap_or(0) }
         };
 
-        let inner_code = generate_element_code(&inner_el, None, id_gen);
+        let inner_parent_ident = format_ident!("__mount_if_parent");
+        let inner_parent_name = inner_parent_ident.to_string();
+        let inner_code = generate_element_code(&inner_el, Some(&inner_parent_name), id_gen);
 
         return quote! {
             {
@@ -291,6 +296,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
                     move || (#condition_expr).to_bool()
                 ), move || {
                     let engine = engine_c.clone();
+                    let #inner_parent_ident = #parent_token;
                     #inner_code
                 });
                 0
@@ -343,7 +349,7 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
 
         let mut field_assignments = Vec::new();
         for attr in &el.attributes {
-            if attr.name == "v-if" || attr.name == "v-for" {
+            if attr.name == "v-if" || attr.name == "v-for" || attr.name == "v-show" {
                 continue;
             }
             let field_name = format_ident!("{}", attr.name.trim_start_matches(':'));
@@ -397,18 +403,36 @@ fn generate_element_code(el: &Element, parent_name: Option<&str>, id_gen: &mut u
         })
         .collect();
 
+    let v_show_code = if let Some(show_condition) = v_show {
+        let sanitized_show = show_condition.replace('\'', "\"");
+        let show_expr: syn::Expr =
+            syn::parse_str(&sanitized_show).unwrap_or_else(|_| syn::parse_str("true").unwrap());
+        quote! {
+            create_effect({
+                let engine = engine.clone();
+                move || {
+                    let visible = (#show_expr).to_bool();
+                    engine.borrow_mut().set_node_visible(#node_var, visible);
+                }
+            });
+        }
+    } else {
+        quote! {}
+    };
+
     quote! {
         let #node_var = #builder.build(engine.clone(), #parent_token);
         {
             #(#child_codes)*
         }
+        #v_show_code
         #node_var
     }
 }
 
 fn apply_attributes(mut builder: TokenStream, attributes: &[Attribute]) -> TokenStream {
     for attr in attributes {
-        if attr.name == "v-for" || attr.name == "v-if" {
+        if attr.name == "v-for" || attr.name == "v-if" || attr.name == "v-show" {
             continue;
         }
 

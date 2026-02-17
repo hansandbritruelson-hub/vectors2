@@ -35,6 +35,8 @@ pub(crate) const NODE_FLAG_IS_INPUT: u32 = 1 << 3;
 pub(crate) const NODE_FLAG_HOVERED: u32 = 1 << 4;
 pub(crate) const NODE_FLAG_HAS_MOUSE_ENTER_LISTENER: u32 = 1 << 5;
 pub(crate) const NODE_FLAG_HAS_MOUSE_LEAVE_LISTENER: u32 = 1 << 6;
+pub(crate) const NODE_FLAG_MOUSE_ENTER_TRIGGERED: u32 = 1 << 7;
+pub(crate) const NODE_FLAG_MOUSE_LEAVE_TRIGGERED: u32 = 1 << 8;
 
 #[derive(Clone, Debug)]
 pub struct UiEventTarget {
@@ -516,7 +518,7 @@ pub struct GpuNode {
     pub signals_finished: u32,
     pub text_start: u32,
     pub text_length: u32,
-    pub flags: u32, // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input, Bit 4 = Hovered, Bit 5 = Has mouseenter listener, Bit 6 = Has mouseleave listener
+    pub flags: u32, // Bit 0 = Visible, Bit 1 = Has Image, Bit 2 = Is Shape, Bit 3 = Is Input, Bit 4 = Hovered, Bit 5 = Has mouseenter listener, Bit 6 = Has mouseleave listener, Bit 7 = mouseenter triggered, Bit 8 = mouseleave triggered
     pub natural_content_width: f32,
 
     // --- Texture Atlas UVs ---
@@ -881,13 +883,8 @@ pub struct FlexEngine {
     pub panic_data: Vec<u32>, // [0] = error_code (prop_id)
 
     pub focused_node: Option<u32>,
-    pub last_hover_target: Option<usize>,
-    #[wasm_bindgen(skip)]
-    pub last_hover_chain: Vec<usize>,
     pub mouse_x: f32,
     pub mouse_y: f32,
-    pub hover_eval_pending: bool,
-    pub has_hover_listeners: bool,
     pub dirty: bool,
     pub device_pixel_ratio: f32,
 }
@@ -933,12 +930,8 @@ impl FlexEngine {
             leaf_nodes: Vec::new(),
             panic_data: vec![0], // Initialize with 0 (no error)
             focused_node: None,
-            last_hover_target: None,
-            last_hover_chain: Vec::new(),
             mouse_x: 0.0,
             mouse_y: 0.0,
-            hover_eval_pending: false,
-            has_hover_listeners: false,
             hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
             device_pixel_ratio: dpr,
@@ -2007,10 +2000,6 @@ impl FlexEngine {
         // 0. Pre-pass: Build class buffers & Texture Management
         self.build_class_buffers();
         self.texture_atlas.process_deletions();
-        self.has_hover_listeners = self
-            .cpu_nodes
-            .iter()
-            .any(|node| node.on_mouse_enter.is_some() || node.on_mouse_leave.is_some());
 
         // Build style map from previous frame's hit_test_nodes
         let style_map: HashMap<u32, (u32, u32, f32, u32, u32, u32, u32)> = self
@@ -2472,6 +2461,21 @@ impl FlexEngine {
         }
     }
 
+    pub fn set_node_visible(&mut self, node_index: u32, visible: bool) {
+        if (node_index as usize) < self.cpu_nodes.len() {
+            let current = self.cpu_nodes[node_index as usize].flags;
+            let next = if visible {
+                current | NODE_FLAG_VISIBLE
+            } else {
+                current & !NODE_FLAG_VISIBLE
+            };
+            if next != current {
+                self.cpu_nodes[node_index as usize].flags = next;
+                self.mark_dirty();
+            }
+        }
+    }
+
     // New Setters
     pub fn set_color(&mut self, node_index: u32, r: f32, g: f32, b: f32, a: f32) {
         if (node_index as usize) < self.cpu_nodes.len() {
@@ -2798,27 +2802,18 @@ impl FlexEngine {
         }
     }
 
-    fn hit_test_cpu_index(&self, x: f32, y: f32) -> Option<usize> {
-        for i in (0..self.hit_test_nodes.len()).rev() {
-            let n = &self.hit_test_nodes[i];
-            if (n.flags & NODE_FLAG_VISIBLE) == 0 {
-                continue;
-            }
-
-            let left = n.final_x;
-            let top = n.final_y;
-            let right = left + n.final_width;
-            let bottom = top + n.final_height;
-
-            if x >= left && x <= right && y >= top && y <= bottom {
-                return Some(n.cpu_index as usize);
-            }
-        }
-        None
+    fn hovered_target_from_gpu(&self) -> Option<usize> {
+        self.hit_test_nodes
+            .iter()
+            .find(|n| (n.flags & NODE_FLAG_HOVERED) != 0)
+            .map(|n| n.cpu_index as usize)
+            .filter(|idx| *idx < self.cpu_nodes.len())
     }
 
     pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
-        let target_cpu_idx = self.hit_test_cpu_index(x, y);
+        self.mouse_x = x;
+        self.mouse_y = y;
+        let target_cpu_idx = self.hovered_target_from_gpu();
 
         if target_cpu_idx.is_none() {
             self.focused_node = None;
@@ -2854,76 +2849,52 @@ impl FlexEngine {
     pub fn handle_mousemove(&mut self, x: f32, y: f32) {
         self.mouse_x = x;
         self.mouse_y = y;
-        self.hover_eval_pending = true;
         self.mark_dirty();
     }
 
-    pub fn process_hover_from_latest_hit_test(
+    pub fn process_hover_from_gpu_readback(
         &mut self,
+        gpu_nodes: Vec<GpuNode>,
     ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
-        if !self.hover_eval_pending {
-            return Vec::new();
-        }
-        self.hover_eval_pending = false;
-
-        let target_cpu_idx = self.hit_test_cpu_index(self.mouse_x, self.mouse_y);
-        if target_cpu_idx == self.last_hover_target {
-            return Vec::new();
-        }
-
-        let mut new_chain = Vec::new();
-        let mut curr = target_cpu_idx;
-        while let Some(idx) = curr {
-            if idx >= self.cpu_nodes.len() {
-                break;
-            }
-            new_chain.push(idx);
-            curr = self.cpu_nodes[idx].parent;
-        }
-        new_chain.reverse();
-
-        let mut common = 0usize;
-        while common < self.last_hover_chain.len()
-            && common < new_chain.len()
-            && self.last_hover_chain[common] == new_chain[common]
-        {
-            common += 1;
-        }
-
+        self.hit_test_nodes = gpu_nodes;
         let mut changed_hover = false;
         let mut leave_callbacks = Vec::new();
         let mut enter_callbacks = Vec::new();
 
-        for &idx in self.last_hover_chain[common..].iter().rev() {
+        for node in &self.hit_test_nodes {
+            let idx = node.cpu_index as usize;
             if idx >= self.cpu_nodes.len() {
                 continue;
             }
-            if self.cpu_nodes[idx].hovered {
-                self.cpu_nodes[idx].hovered = false;
-                changed_hover = true;
+            let is_hovered = (node.flags & NODE_FLAG_HOVERED) != 0;
+            let leave_triggered = (node.flags & NODE_FLAG_MOUSE_LEAVE_TRIGGERED) != 0;
+            let enter_triggered = (node.flags & NODE_FLAG_MOUSE_ENTER_TRIGGERED) != 0;
+            let mut leave_cb = None;
+            let mut enter_cb = None;
+
+            {
+                let cpu_node = &mut self.cpu_nodes[idx];
+                if cpu_node.hovered != is_hovered {
+                    cpu_node.hovered = is_hovered;
+                    changed_hover = true;
+                }
+                if leave_triggered {
+                    leave_cb = cpu_node.on_mouse_leave.clone();
+                }
+                if enter_triggered {
+                    enter_cb = cpu_node.on_mouse_enter.clone();
+                }
             }
-            if let Some(cb) = &self.cpu_nodes[idx].on_mouse_leave {
+
+            if let Some(cb) = leave_cb {
                 let event = self.build_ui_event("mouseleave", idx, idx, self.mouse_x, self.mouse_y);
-                leave_callbacks.push((cb.clone(), event));
+                leave_callbacks.push((cb, event));
             }
-        }
-
-        for &idx in &new_chain[common..] {
-            if idx >= self.cpu_nodes.len() {
-                continue;
-            }
-            if !self.cpu_nodes[idx].hovered {
-                self.cpu_nodes[idx].hovered = true;
-                changed_hover = true;
-            }
-            if let Some(cb) = &self.cpu_nodes[idx].on_mouse_enter {
+            if let Some(cb) = enter_cb {
                 let event = self.build_ui_event("mouseenter", idx, idx, self.mouse_x, self.mouse_y);
-                enter_callbacks.push((cb.clone(), event));
+                enter_callbacks.push((cb, event));
             }
         }
-
-        self.last_hover_target = target_cpu_idx;
-        self.last_hover_chain = new_chain;
 
         if changed_hover {
             self.mark_dirty();
@@ -2931,6 +2902,25 @@ impl FlexEngine {
 
         leave_callbacks.extend(enter_callbacks);
         leave_callbacks
+    }
+
+    pub fn sync_hover_state_from_gpu_readback(&mut self, gpu_nodes: Vec<GpuNode>) {
+        self.hit_test_nodes = gpu_nodes;
+        let mut changed_hover = false;
+        for node in &self.hit_test_nodes {
+            let idx = node.cpu_index as usize;
+            if idx >= self.cpu_nodes.len() {
+                continue;
+            }
+            let is_hovered = (node.flags & NODE_FLAG_HOVERED) != 0;
+            if self.cpu_nodes[idx].hovered != is_hovered {
+                self.cpu_nodes[idx].hovered = is_hovered;
+                changed_hover = true;
+            }
+        }
+        if changed_hover {
+            self.mark_dirty();
+        }
     }
 
     pub fn handle_keydown(&mut self, key: String) -> Option<(std::rc::Rc<dyn Fn(String)>, String)> {

@@ -27,15 +27,20 @@
 
     <div class="main-content">
       <div class="top-bar">
-        <div
-          class="file-menu-container"
-          @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); set_file_menu_open.set(true); }"
-          @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); set_file_menu_open.set(false); }"
-        >
-          <div class="menu-item file-menu-trigger">
+        <div class="file-menu-container">
+          <div
+            class="menu-item file-menu-trigger"
+            @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); set_file_menu_open.set(true); }"
+            @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); set_file_menu_open.set(false); }"
+          >
             File
           </div>
-          <div class="file-menu-dropdown" v-if="file_menu_open == true">
+          <div
+            class="file-menu-dropdown"
+            v-show="file_menu_open == true"
+            @mouseenter="{ renderer_core::log(\"menu: file mouseenter\"); set_file_menu_open.set(true); }"
+            @mouseleave="{ renderer_core::log(\"menu: file mouseleave\"); set_file_menu_open.set(false); }"
+          >
             <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command new file\"); }">New File</div>
             <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command open\"); }">Open...</div>
             <div class="file-menu-command" @click="{ renderer_core::log(\"menu: command save\"); }">Save</div>
