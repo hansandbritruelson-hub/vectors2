@@ -2825,17 +2825,101 @@ impl FlexEngine {
     }
 
     fn hovered_target_from_gpu(&self) -> Option<usize> {
-        self.hit_test_nodes
-            .iter()
-            .find(|n| (n.flags & NODE_FLAG_HOVERED) != 0)
-            .map(|n| n.cpu_index as usize)
-            .filter(|idx| *idx < self.cpu_nodes.len())
+        let mut best: Option<(f32, usize, usize)> = None; // (z_index, depth, cpu_idx)
+
+        for node in &self.hit_test_nodes {
+            if (node.flags & NODE_FLAG_HOVERED) == 0 {
+                continue;
+            }
+
+            let cpu_idx = node.cpu_index as usize;
+            if cpu_idx >= self.cpu_nodes.len() {
+                continue;
+            }
+
+            // Prefer deeper nodes when z-index is tied so clicks target the most specific element.
+            let mut depth = 0usize;
+            let mut current = Some(cpu_idx);
+            while let Some(idx) = current {
+                depth += 1;
+                current = self.cpu_nodes[idx].parent;
+            }
+
+            let replace = match best {
+                None => true,
+                Some((best_z, best_depth, best_idx)) => {
+                    match node.z_index.total_cmp(&best_z) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Less => false,
+                        std::cmp::Ordering::Equal => {
+                            depth > best_depth || (depth == best_depth && cpu_idx > best_idx)
+                        }
+                    }
+                }
+            };
+
+            if replace {
+                best = Some((node.z_index, depth, cpu_idx));
+            }
+        }
+
+        best.map(|(_, _, cpu_idx)| cpu_idx)
+    }
+
+    fn target_from_point_snapshot(&self, x: f32, y: f32) -> Option<usize> {
+        let mut best: Option<(f32, usize, usize)> = None; // (z_index, depth, cpu_idx)
+
+        for node in &self.hit_test_nodes {
+            if (node.flags & NODE_FLAG_VISIBLE) == 0 {
+                continue;
+            }
+            if x < node.final_x
+                || x > node.final_x + node.final_width
+                || y < node.final_y
+                || y > node.final_y + node.final_height
+            {
+                continue;
+            }
+
+            let cpu_idx = node.cpu_index as usize;
+            if cpu_idx >= self.cpu_nodes.len() {
+                continue;
+            }
+
+            let mut depth = 0usize;
+            let mut current = Some(cpu_idx);
+            while let Some(idx) = current {
+                depth += 1;
+                current = self.cpu_nodes[idx].parent;
+            }
+
+            let replace = match best {
+                None => true,
+                Some((best_z, best_depth, best_idx)) => {
+                    match node.z_index.total_cmp(&best_z) {
+                        std::cmp::Ordering::Greater => true,
+                        std::cmp::Ordering::Less => false,
+                        std::cmp::Ordering::Equal => {
+                            depth > best_depth || (depth == best_depth && cpu_idx > best_idx)
+                        }
+                    }
+                }
+            };
+
+            if replace {
+                best = Some((node.z_index, depth, cpu_idx));
+            }
+        }
+
+        best.map(|(_, _, cpu_idx)| cpu_idx)
     }
 
     pub fn handle_click(&mut self, x: f32, y: f32) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
         self.mouse_x = x;
         self.mouse_y = y;
-        let target_cpu_idx = self.hovered_target_from_gpu();
+        let target_cpu_idx = self
+            .hovered_target_from_gpu()
+            .or_else(|| self.target_from_point_snapshot(x, y));
 
         if target_cpu_idx.is_none() {
             self.focused_node = None;

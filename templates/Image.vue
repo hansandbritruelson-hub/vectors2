@@ -666,12 +666,22 @@
 }
 
 .path-shape {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   fill: transparent;
   stroke: #ff2d2d;
   stroke-width: 2px;
 }
 
 .point-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   fill: #ff2d2d;
   stroke: transparent;
   stroke-width: 0px;

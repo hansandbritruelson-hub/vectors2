@@ -287,19 +287,51 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
         if ((in.flags & 4u) != 0u) { // Shape
             if (in.curve_count == 0u) { discard; }
-            var total_coverage = 0.0;
-            let SAMPLES = 4u;
-            for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
-                for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {
-                    let sub_offset = (vec2<f32>(f32(sx), f32(sy)) / f32(SAMPLES)) - 0.5;
-                    let p_sub = pixel_pos + sub_offset.x * dx + sub_offset.y * dy;
-                    if (calculate_winding(p_sub, in.curve_start, in.curve_count) != 0) {
-                        total_coverage += 1.0;
+            var fill_color = unpack4x8unorm(node.fill_color);
+            let stroke_color = unpack4x8unorm(node.stroke_color);
+            let stroke_half_w = max(0.0, node.stroke_width * 0.5);
+
+            // Backward compatibility: if no explicit fill/stroke style is set,
+            // treat node background color as fill.
+            if (fill_color.a <= 0.0 && stroke_color.a <= 0.0 && in.color.a > 0.0) {
+                fill_color = in.color;
+            }
+
+            var fill_coverage = 0.0;
+            if (fill_color.a > 0.0) {
+                var total_coverage = 0.0;
+                let SAMPLES = 4u;
+                for (var sy = 0u; sy < SAMPLES; sy = sy + 1u) {
+                    for (var sx = 0u; sx < SAMPLES; sx = sx + 1u) {
+                        let sub_offset = (vec2<f32>(f32(sx), f32(sy)) / f32(SAMPLES)) - 0.5;
+                        let p_sub = pixel_pos + sub_offset.x * dx + sub_offset.y * dy;
+                        if (calculate_winding(p_sub, in.curve_start, in.curve_count) != 0) {
+                            total_coverage += 1.0;
+                        }
                     }
                 }
+                fill_coverage = total_coverage / f32(SAMPLES * SAMPLES);
             }
-            let alpha = total_coverage / f32(SAMPLES * SAMPLES);
-            return vec4<f32>(in.color.rgb, alpha * in.color.a);
+
+            var stroke_coverage = 0.0;
+            if (stroke_color.a > 0.0 && stroke_half_w > 0.0) {
+                let d = min_distance_to_curves(pixel_pos, in.curve_start, in.curve_count);
+                let aa = 1.0;
+                stroke_coverage = 1.0 - smoothstep(stroke_half_w - aa, stroke_half_w + aa, d);
+            }
+
+            let fill_alpha = fill_coverage * fill_color.a;
+            let stroke_alpha = stroke_coverage * stroke_color.a;
+            let out_alpha = stroke_alpha + fill_alpha * (1.0 - stroke_alpha);
+
+            if (out_alpha <= 0.001) { discard; }
+
+            let out_rgb = (
+                stroke_color.rgb * stroke_alpha +
+                fill_color.rgb * fill_alpha * (1.0 - stroke_alpha)
+            ) / max(out_alpha, 1e-5);
+
+            return vec4<f32>(out_rgb, out_alpha);
         }
         return in.color;
     }
@@ -455,6 +487,43 @@ fn is_inside(p: vec2<f32>, info: GlyphInfo) -> bool {
     let count = info.count;
     
     return calculate_winding(p, start, count) != 0;
+}
+
+fn cubic_point(curve: Curve, t: f32) -> vec2<f32> {
+    let mt = 1.0 - t;
+    return
+        mt * mt * mt * curve.p0 +
+        3.0 * mt * mt * t * curve.p1 +
+        3.0 * mt * t * t * curve.p2 +
+        t * t * t * curve.p3;
+}
+
+fn point_segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let ab_len2 = dot(ab, ab);
+    if (ab_len2 <= 1e-6) {
+        return distance(p, a);
+    }
+    let t = clamp(dot(p - a, ab) / ab_len2, 0.0, 1.0);
+    let proj = a + t * ab;
+    return distance(p, proj);
+}
+
+fn min_distance_to_curves(p: vec2<f32>, start: u32, count: u32) -> f32 {
+    var min_d = 1e9;
+    let STEPS = 18u;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let curve = curves[start + i];
+        var prev = curve.p0;
+        for (var s = 1u; s <= STEPS; s = s + 1u) {
+            let t = f32(s) / f32(STEPS);
+            let curr = cubic_point(curve, t);
+            let d = point_segment_distance(p, prev, curr);
+            min_d = min(min_d, d);
+            prev = curr;
+        }
+    }
+    return min_d;
 }
 
 fn calculate_winding(p: vec2<f32>, start: u32, count: u32) -> i32 {
