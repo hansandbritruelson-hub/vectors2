@@ -25,14 +25,14 @@
         class="tool-icon active"
         @click="{ set_active_tool.set(TOOL_BEZIER.to_string()); }"
       >
-        <img src="asset://phosphor/pencil.svg" class="icon-img" />
+        <img src="asset://phosphor/bezier-curve.svg" class="icon-img" />
       </div>
       <div
         v-if="active_tool != TOOL_BEZIER"
         class="tool-icon"
         @click="{ set_active_tool.set(TOOL_BEZIER.to_string()); }"
       >
-        <img src="asset://phosphor/pencil.svg" class="icon-img" />
+        <img src="asset://phosphor/bezier-curve.svg" class="icon-img" />
       </div>
 
       <SmartShapeMenuItem>
