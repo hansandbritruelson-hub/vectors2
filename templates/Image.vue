@@ -35,12 +35,54 @@
         <img src="asset://phosphor/pencil.svg" class="icon-img" />
       </div>
 
-      <div class="tool-icon">
-        <img src="asset://phosphor/square.svg" class="icon-img" />
-      </div>
-      <div class="tool-icon">
-        <img src="asset://phosphor/circle.svg" class="icon-img" />
-      </div>
+      <SmartShapeMenuItem>
+        <div
+          v-if="active_tool == TOOL_SHAPE_RECT"
+          class="smart-shape-trigger-icon active"
+          @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_RECT.to_string()); renderer_core::log(\"tool: shape-rect\"); }"
+        >
+          <img src="asset://phosphor/square.svg" class="smart-shape-icon-img" />
+        </div>
+        <div
+          v-if="active_tool != TOOL_SHAPE_RECT"
+          class="smart-shape-trigger-icon"
+          @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_RECT.to_string()); renderer_core::log(\"tool: shape-rect\"); }"
+        >
+          <img src="asset://phosphor/square.svg" class="smart-shape-icon-img" />
+        </div>
+
+        <template #flyout>
+          <div
+            v-if="active_tool == TOOL_SHAPE_CIRCLE"
+            class="smart-shape-flyout-tool-icon active"
+            @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_CIRCLE.to_string()); renderer_core::log(\"tool: shape-circle\"); }"
+          >
+            <img src="asset://phosphor/circle.svg" class="smart-shape-icon-img" />
+          </div>
+          <div
+            v-if="active_tool != TOOL_SHAPE_CIRCLE"
+            class="smart-shape-flyout-tool-icon"
+            @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_CIRCLE.to_string()); renderer_core::log(\"tool: shape-circle\"); }"
+          >
+            <img src="asset://phosphor/circle.svg" class="smart-shape-icon-img" />
+          </div>
+
+          <div
+            v-if="active_tool == TOOL_SHAPE_LINE"
+            class="smart-shape-flyout-tool-icon active"
+            @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_LINE.to_string()); renderer_core::log(\"tool: shape-line\"); }"
+          >
+            <img src="asset://phosphor/line.svg" class="smart-shape-icon-img" />
+          </div>
+          <div
+            v-if="active_tool != TOOL_SHAPE_LINE"
+            class="smart-shape-flyout-tool-icon"
+            @click="{ set_active_path_id.set(String::new()); set_active_tool.set(TOOL_SHAPE_LINE.to_string()); renderer_core::log(\"tool: shape-line\"); }"
+          >
+            <img src="asset://phosphor/line.svg" class="smart-shape-icon-img" />
+          </div>
+        </template>
+      </SmartShapeMenuItem>
       <div class="tool-icon">
         <img src="asset://phosphor/hand-grabbing.svg" class="icon-img" />
       </div>
@@ -153,12 +195,19 @@
 </template>
 
 <script>
-  use crate::design::{VectorFile, VectorObject, VectorPoint};
+  mod SmartShapeMenuItem;
+
+  use crate::design::{VectorFile, VectorHandle, VectorObject, VectorPoint};
 
   const TOOL_SELECT: &str = "select";
   const TOOL_BEZIER: &str = "bezier";
+  const TOOL_SHAPE_RECT: &str = "shape-rect";
+  const TOOL_SHAPE_CIRCLE: &str = "shape-circle";
+  const TOOL_SHAPE_LINE: &str = "shape-line";
   const SNAP_DISTANCE: f32 = 12.0;
   const BASE_OBJECT_Z_INDEX: f32 = 10.0;
+  const HANDLE_RATIO: f32 = 0.3;
+  const MAX_HANDLE_LENGTH: f32 = 64.0;
 
   #[derive(Clone)]
   pub struct PointMarker {
@@ -175,30 +224,54 @@
       return String::new();
     }
 
+    fn append_segment(path_data: &mut String, from: &VectorPoint, to: &VectorPoint) {
+      let has_curve = from.handle_out.is_some() || to.handle_in.is_some();
+      if has_curve {
+        let (c1_x, c1_y) = if let Some(handle) = &from.handle_out {
+          (handle.x, handle.y)
+        } else {
+          (from.x, from.y)
+        };
+        let (c2_x, c2_y) = if let Some(handle) = &to.handle_in {
+          (handle.x, handle.y)
+        } else {
+          (to.x, to.y)
+        };
+        path_data.push_str(&format!(
+          " C {:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
+          c1_x, c1_y, c2_x, c2_y, to.x, to.y
+        ));
+      } else {
+        path_data.push_str(&format!(" L {:.2} {:.2}", to.x, to.y));
+      }
+    }
+
     let mut path_data = format!("M {:.2} {:.2}", points[0].x, points[0].y);
-    for point in points.iter().skip(1) {
-      path_data.push_str(&format!(" L {:.2} {:.2}", point.x, point.y));
+    for index in 1..points.len() {
+      append_segment(&mut path_data, &points[index - 1], &points[index]);
     }
 
     if closed {
+      if points.len() > 1 {
+        append_segment(&mut path_data, &points[points.len() - 1], &points[0]);
+      }
       path_data.push_str(" Z");
     }
 
     path_data
   }
 
-  fn build_point_marker_path(point: &VectorPoint) -> String {
-    let size = 3.0;
+  fn build_square_marker_path(x: f32, y: f32, size: f32) -> String {
     format!(
       "M {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2} Z",
-      point.x - size,
-      point.y - size,
-      point.x + size,
-      point.y - size,
-      point.x + size,
-      point.y + size,
-      point.x - size,
-      point.y + size,
+      x - size,
+      y - size,
+      x + size,
+      y - size,
+      x + size,
+      y + size,
+      x - size,
+      y + size,
     )
   }
 
@@ -213,12 +286,83 @@
       for point in &object.points {
         markers.push(PointMarker {
           id: format!("{}-{}", object.id, point.id),
-          path_data: build_point_marker_path(point),
+          path_data: build_square_marker_path(point.x, point.y, 3.0),
         });
+
+        if let Some(handle_in) = &point.handle_in {
+          markers.push(PointMarker {
+            id: format!("{}-{}-in", object.id, point.id),
+            path_data: build_square_marker_path(handle_in.x, handle_in.y, 2.0),
+          });
+        }
+
+        if let Some(handle_out) = &point.handle_out {
+          markers.push(PointMarker {
+            id: format!("{}-{}-out", object.id, point.id),
+            path_data: build_square_marker_path(handle_out.x, handle_out.y, 2.0),
+          });
+        }
       }
     }
 
     markers
+  }
+
+  fn distance(x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    ((dx * dx) + (dy * dy)).sqrt()
+  }
+
+  fn recompute_auto_handles(points: &mut [VectorPoint], closed: bool) {
+    if points.len() < 2 {
+      return;
+    }
+
+    for point in points.iter_mut() {
+      point.handle_in = None;
+      point.handle_out = None;
+    }
+
+    let point_count = points.len();
+    for i in 0..point_count {
+      let has_prev = i > 0 || closed;
+      let has_next = i + 1 < point_count || closed;
+      if !has_prev || !has_next {
+        continue;
+      }
+
+      let prev_idx = if i == 0 { point_count - 1 } else { i - 1 };
+      let next_idx = if i + 1 == point_count { 0 } else { i + 1 };
+
+      let prev_x = points[prev_idx].x;
+      let prev_y = points[prev_idx].y;
+      let curr_x = points[i].x;
+      let curr_y = points[i].y;
+      let next_x = points[next_idx].x;
+      let next_y = points[next_idx].y;
+
+      let tangent_x = next_x - prev_x;
+      let tangent_y = next_y - prev_y;
+      let tangent_len = ((tangent_x * tangent_x) + (tangent_y * tangent_y)).sqrt();
+      if tangent_len < 0.0001 {
+        continue;
+      }
+
+      let dir_x = tangent_x / tangent_len;
+      let dir_y = tangent_y / tangent_len;
+      let in_len = (distance(prev_x, prev_y, curr_x, curr_y) * HANDLE_RATIO).min(MAX_HANDLE_LENGTH);
+      let out_len = (distance(curr_x, curr_y, next_x, next_y) * HANDLE_RATIO).min(MAX_HANDLE_LENGTH);
+
+      points[i].handle_in = Some(VectorHandle {
+        x: curr_x - (dir_x * in_len),
+        y: curr_y - (dir_y * in_len),
+      });
+      points[i].handle_out = Some(VectorHandle {
+        x: curr_x + (dir_x * out_len),
+        y: curr_y + (dir_y * out_len),
+      });
+    }
   }
 
   fn next_path_number(objects: &[VectorObject]) -> usize {
@@ -278,6 +422,8 @@
           id: "pt-1".to_string(),
           x: click_x,
           y: click_y,
+          handle_in: None,
+          handle_out: None,
         }],
         path_data: String::new(),
       };
@@ -305,6 +451,7 @@
 
       if should_close {
         path_object.closed = true;
+        recompute_auto_handles(&mut path_object.points, true);
         path_object.path_data = build_path_data(&path_object.points, true);
         commit_objects(next_objects);
         set_active_path_id.set(String::new());
@@ -316,7 +463,10 @@
         id: format!("pt-{}", next_point_number),
         x: click_x,
         y: click_y,
+        handle_in: None,
+        handle_out: None,
       });
+      recompute_auto_handles(&mut path_object.points, false);
       path_object.path_data = build_path_data(&path_object.points, false);
       commit_objects(next_objects);
     }

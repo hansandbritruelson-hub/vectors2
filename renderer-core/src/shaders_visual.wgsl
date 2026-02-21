@@ -319,28 +319,47 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // --- Box Shadow (Bottom Layer) ---
-    let shadow_color = unpack4x8unorm(node.box_shadow_color);
-    if (shadow_color.a > 0.0) {
-        let shadow_pos = pixel_pos - vec2<f32>(node.box_shadow_h_offset, node.box_shadow_v_offset);
-        let s_dist_x = max(-shadow_pos.x - node.box_shadow_spread, shadow_pos.x - dims.x - node.box_shadow_spread);
-        let s_dist_y = max(-shadow_pos.y - node.box_shadow_spread, shadow_pos.y - dims.y - node.box_shadow_spread);
-        let shadow_dist = max(s_dist_x, s_dist_y);
-        
-        var shadow_alpha = 0.0;
-        if (node.box_shadow_blur <= 0.0) {
-            shadow_alpha = select(0.0, 1.0, shadow_dist <= 0.0);
-        } else {
-            shadow_alpha = 1.0 - smoothstep(-node.box_shadow_blur, node.box_shadow_blur, shadow_dist);
-        }
-        
-        if (shadow_alpha > 0.0) {
-             return vec4<f32>(shadow_color.rgb, shadow_color.a * shadow_alpha);
-        }
-    }
-
     discard;
     return vec4<f32>(0.0);
+}
+
+@fragment
+fn fs_shadow(in: VertexOutput) -> @location(0) vec4<f32> {
+    let node = nodes[in.instance_index];
+    let pixel_pos = in.local_pos;
+    let dims = in.dimensions;
+
+    // Do not render shadow over the node's own box or outline regions.
+    let dist_x = max(-pixel_pos.x, pixel_pos.x - dims.x);
+    let dist_y = max(-pixel_pos.y, pixel_pos.y - dims.y);
+    let box_dist = max(dist_x, dist_y);
+    let outline_outer = node.outline_offset + node.outline_width;
+    if (box_dist <= outline_outer) {
+        discard;
+    }
+
+    let shadow_color = unpack4x8unorm(node.box_shadow_color);
+    if (shadow_color.a <= 0.0) {
+        discard;
+    }
+
+    let shadow_pos = pixel_pos - vec2<f32>(node.box_shadow_h_offset, node.box_shadow_v_offset);
+    let s_dist_x = max(-shadow_pos.x - node.box_shadow_spread, shadow_pos.x - dims.x - node.box_shadow_spread);
+    let s_dist_y = max(-shadow_pos.y - node.box_shadow_spread, shadow_pos.y - dims.y - node.box_shadow_spread);
+    let shadow_dist = max(s_dist_x, s_dist_y);
+
+    var shadow_alpha = 0.0;
+    if (node.box_shadow_blur <= 0.0) {
+        shadow_alpha = select(0.0, 1.0, shadow_dist <= 0.0);
+    } else {
+        shadow_alpha = 1.0 - smoothstep(-node.box_shadow_blur, node.box_shadow_blur, shadow_dist);
+    }
+
+    if (shadow_alpha <= 0.0) {
+        discard;
+    }
+
+    return vec4<f32>(shadow_color.rgb, shadow_color.a * shadow_alpha);
 }
 
 @vertex

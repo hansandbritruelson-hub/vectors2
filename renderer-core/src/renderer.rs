@@ -57,6 +57,7 @@ pub struct FlexRenderer {
     pipeline_height_bottom_up: Option<GpuComputePipeline>,
     pipeline_final_layout: Option<GpuComputePipeline>,
     pipeline_render: Option<GpuRenderPipeline>,
+    pipeline_render_shadow: Option<GpuRenderPipeline>,
     pipeline_render_text: Option<GpuRenderPipeline>,
     pipeline_resolve_styles: Option<GpuComputePipeline>,
     pipeline_inherit_styles: Option<GpuComputePipeline>,
@@ -132,6 +133,7 @@ impl FlexRenderer {
             pipeline_height_bottom_up: None,
             pipeline_final_layout: None,
             pipeline_render: None,
+            pipeline_render_shadow: None,
             pipeline_render_text: None,
             pipeline_resolve_styles: None,
             pipeline_inherit_styles: None,
@@ -555,7 +557,8 @@ impl FlexRenderer {
         self.pipeline_hit_test_pass_1 = Some(create_compute("hit_test_pass_1"));
         self.pipeline_hit_test_pass_2 = Some(create_compute("hit_test_pass_2"));
 
-        let create_render = |vs_entry: &str, fs_entry: &str| -> GpuRenderPipeline {
+        let create_render =
+            |vs_entry: &str, fs_entry: &str, depth_write_enabled: bool| -> GpuRenderPipeline {
             let vs_state_obj = js_sys::Object::new();
             Reflect::set(&vs_state_obj, &"module".into(), &module_visual).unwrap();
             Reflect::set(&vs_state_obj, &"entryPoint".into(), &vs_entry.into()).unwrap();
@@ -586,7 +589,12 @@ impl FlexRenderer {
                 GpuFragmentState::new(fs_entry, &module_visual, &js_sys::Array::of1(&target));
             let depth_state = js_sys::Object::new();
             Reflect::set(&depth_state, &"format".into(), &"depth24plus".into()).unwrap();
-            Reflect::set(&depth_state, &"depthWriteEnabled".into(), &true.into()).unwrap();
+            Reflect::set(
+                &depth_state,
+                &"depthWriteEnabled".into(),
+                &depth_write_enabled.into(),
+            )
+            .unwrap();
             Reflect::set(&depth_state, &"depthCompare".into(), &"less-equal".into()).unwrap();
             let desc = js_sys::Object::new();
             Reflect::set(&desc, &"layout".into(), &layout_render).unwrap();
@@ -599,8 +607,9 @@ impl FlexRenderer {
             self.device.create_render_pipeline(&desc.unchecked_into())
         };
 
-        self.pipeline_render = Some(create_render("vs_main", "fs_main"));
-        self.pipeline_render_text = Some(create_render("vs_text", "fs_text"));
+        self.pipeline_render = Some(create_render("vs_main", "fs_main", true));
+        self.pipeline_render_shadow = Some(create_render("vs_main", "fs_shadow", false));
+        self.pipeline_render_text = Some(create_render("vs_text", "fs_text", true));
 
         // Texture & Sampler Setup
         self.sampler = Some(
@@ -1391,6 +1400,10 @@ impl FlexRenderer {
 
         let render_pass = command_encoder.begin_render_pass(&render_pass_desc);
         render_pass.set_pipeline_render(self.pipeline_render.as_ref().unwrap());
+        render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
+        render_pass.draw_with_instance_count(6, node_count, 0, 0);
+
+        render_pass.set_pipeline_render(self.pipeline_render_shadow.as_ref().unwrap());
         render_pass.set_bind_group_render(0, self.bind_group_render.as_ref().unwrap());
         render_pass.draw_with_instance_count(6, node_count, 0, 0);
 
