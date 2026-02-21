@@ -37,13 +37,9 @@ async function run() {
     const device = await adapter.requestDevice();
 
     const canvas = document.createElement('canvas');
-    // Handle High-DPI (Retina) displays
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
-    // Keep the display size matching the window (CSS pixels)
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
+    canvas.style.display = 'block';
+    canvas.style.position = 'fixed';
+    canvas.style.inset = '0';
 
     document.body.appendChild(canvas);
 
@@ -62,9 +58,21 @@ async function run() {
     renderer = create_app_renderer(device, context);
 
     await renderer.init();
+    renderer.sync_viewport();
 
     // Initial render
     renderer.render();
+
+    const syncViewportAndRender = () => {
+        if (renderer) {
+            renderer.sync_viewport();
+            renderer.handle_mousemove(-1, -1);
+            renderer.render();
+        }
+    };
+
+    window.addEventListener('resize', syncViewportAndRender);
+    window.visualViewport?.addEventListener('resize', syncViewportAndRender);
 
     canvas.addEventListener('mousedown', async (e) => {
         if (!renderer) return;

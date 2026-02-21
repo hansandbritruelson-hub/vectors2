@@ -12,6 +12,48 @@ extern "C" {
 }
 
 #[wasm_bindgen(inline_js = "
+export function sync_canvas_to_viewport(canvas, requestedDpr) {
+    const win = (typeof window !== 'undefined') ? window : undefined;
+    if (!win || !canvas) {
+        return [1, 1, 1];
+    }
+
+    const vv = win.visualViewport;
+    const viewportWidth = (vv && Number.isFinite(vv.width) && vv.width > 0)
+        ? vv.width
+        : (Number.isFinite(win.innerWidth) && win.innerWidth > 0 ? win.innerWidth : 1);
+    const viewportHeight = (vv && Number.isFinite(vv.height) && vv.height > 0)
+        ? vv.height
+        : (Number.isFinite(win.innerHeight) && win.innerHeight > 0 ? win.innerHeight : 1);
+
+    const dpr = (Number.isFinite(requestedDpr) && requestedDpr > 0)
+        ? requestedDpr
+        : (Number.isFinite(win.devicePixelRatio) && win.devicePixelRatio > 0 ? win.devicePixelRatio : 1);
+
+    const cssWidth = Math.max(1, Math.round(viewportWidth));
+    const cssHeight = Math.max(1, Math.round(viewportHeight));
+    const pixelWidth = Math.max(1, Math.round(cssWidth * dpr));
+    const pixelHeight = Math.max(1, Math.round(cssHeight * dpr));
+
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+
+    const cssWidthPx = `${cssWidth}px`;
+    const cssHeightPx = `${cssHeight}px`;
+    if (canvas.style.width !== cssWidthPx) canvas.style.width = cssWidthPx;
+    if (canvas.style.height !== cssHeightPx) canvas.style.height = cssHeightPx;
+    if (canvas.style.position !== 'fixed') canvas.style.position = 'fixed';
+    if (canvas.style.inset !== '0px') canvas.style.inset = '0';
+    if (canvas.style.display !== 'block') canvas.style.display = 'block';
+
+    return [cssWidth, cssHeight, dpr];
+}
+")]
+extern "C" {
+    pub fn sync_canvas_to_viewport(canvas: &HtmlCanvasElement, requested_dpr: f64) -> js_sys::Array;
+}
+
+#[wasm_bindgen(inline_js = "
 export async function download_image(url) {
     const response = await fetch(url);
     const blob = await response.blob();

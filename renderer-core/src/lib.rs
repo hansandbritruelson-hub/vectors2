@@ -2502,6 +2502,22 @@ impl FlexEngine {
     pub fn set_text_length(&mut self, _node_index: u32, _length: u32) {
         // Automatically handled in flatten now
     }
+
+    pub fn get_node_final_position(&self, node_id: u32) -> (f32, f32) {
+        if let Some(node) = self
+            .hit_test_nodes
+            .iter()
+            .find(|node| node.cpu_index == node_id)
+        {
+            return (node.final_x, node.final_y);
+        }
+
+        if let Some(node) = self.gpu_nodes.iter().find(|node| node.cpu_index == node_id) {
+            return (node.final_x, node.final_y);
+        }
+
+        (0.0, 0.0)
+    }
 }
 
 #[wasm_bindgen]
@@ -2511,6 +2527,14 @@ impl FlexEngine {
             return;
         }
         self.cpu_nodes[node_index as usize].text = Some(text.to_string());
+        self.mark_dirty();
+    }
+
+    pub fn set_shape_data(&mut self, node_index: u32, path_data: &str) {
+        if (node_index as usize) >= self.cpu_nodes.len() {
+            return;
+        }
+        self.cpu_nodes[node_index as usize].shape_data = Some(path_data.to_string());
         self.mark_dirty();
     }
 

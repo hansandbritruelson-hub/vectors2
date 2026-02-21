@@ -33,9 +33,8 @@
         <div class="status-text">GPU Ready</div>
       </div>
     </div>
-    <div style="max-width:10px; background-color: #FF0000">SUPER LONG TEXT HERE</div>
     <div class="view-content">
-      <Image v-if="view == 'image'" :design="design.clone()" />
+      <Image v-if="view == 'image'" :open_file="open_file.clone()" />
       <Video v-if="view == 'video'" />
       <CssDemo v-if="view == 'css-demo'" />
     </div>
@@ -47,22 +46,30 @@
     mod Video;
     mod CssDemo;
     
-    use crate::design::Design;
+    use crate::design::VectorFile;
     
     let (view, set_view) = crate::signals::create_signal("image".to_string());
-    let design = Rc::new(Design { path: "assets/project.gemini".to_string() });
+    let open_file = Rc::new(RefCell::new(VectorFile {
+      path: "assets/project.gemini".to_string(),
+      objects: vec![],
+    }));
 </script>
 
 <style>
 .app-root {
   width: 100vw;
   height: 100vh;
+  position: relative;
   flex-direction: column;
   background-color: #0c0c0c;
-  
 }
 
 .app-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
   height: 56px;
   flex-direction: row;
   background-color: #1e1e1e;
@@ -151,8 +158,12 @@
 }
 
 .view-content {
+  position: absolute;
+  top: 56px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   flex-direction: column;
-  padding: 10px 12px 12px 12px;
 }
 
 .font-size-test {

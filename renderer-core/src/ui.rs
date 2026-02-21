@@ -28,6 +28,7 @@ pub struct Element {
     flags: u32,
 
     value_signal: Option<ReadSignal<String>>,
+    path_signal: Option<ReadSignal<String>>,
     flags_signal: Option<ReadSignal<u32>>,
 
     on_click: Option<Rc<dyn Fn(crate::UiEvent)>>,
@@ -49,6 +50,7 @@ impl Element {
             image_id: None,
             flags: 1, // Visible
             value_signal: None,
+            path_signal: None,
             flags_signal: None,
             on_click: None,
             on_mouse_enter: None,
@@ -141,6 +143,10 @@ impl Element {
     pub fn bind_text(self, signal: ReadSignal<String>) -> Self {
         self.value(signal)
     } // Deprecated
+    pub fn bind_path(mut self, signal: ReadSignal<String>) -> Self {
+        self.path_signal = Some(signal);
+        self
+    }
     pub fn bind_flags(mut self, signal: ReadSignal<u32>) -> Self {
         self.flags_signal = Some(signal);
         self
@@ -237,6 +243,16 @@ impl Element {
                 if let Some(engine) = engine_weak.upgrade() {
                     let val = sig.get();
                     engine.borrow_mut().set_text(node_id, &val);
+                }
+            });
+        }
+
+        if let Some(sig) = self.path_signal {
+            let engine_weak = Rc::downgrade(&engine);
+            create_effect(move || {
+                if let Some(engine) = engine_weak.upgrade() {
+                    let val = sig.get();
+                    engine.borrow_mut().set_shape_data(node_id, &val);
                 }
             });
         }

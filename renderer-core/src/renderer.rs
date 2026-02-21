@@ -1,12 +1,12 @@
 use crate::web_bindings::{
-    get_window, request_render_frame, GpuBindGroup, GpuBindGroupDescriptor, GpuBindGroupEntry,
-    GpuBindGroupLayout,
-    GpuBindGroupLayoutDescriptor, GpuBindGroupLayoutEntry, GpuBuffer, GpuBufferBindingLayout,
-    GpuBufferBindingType, GpuBufferDescriptor, GpuCanvasContext, GpuColorTargetState,
-    GpuComputePassEncoder, GpuComputePipeline, GpuDevice, GpuExtent3D, GpuFragmentState,
-    GpuImageCopyTexture, GpuImageDataLayout, GpuPipelineLayoutDescriptor, GpuRenderPassDescriptor,
-    GpuRenderPipeline, GpuSampler, GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuShaderStage,
-    GpuTexture, GpuTextureDescriptor, GpuTextureFormat, GpuTextureUsage, HtmlCanvasElement,
+    request_render_frame, sync_canvas_to_viewport, GpuBindGroup, GpuBindGroupDescriptor,
+    GpuBindGroupEntry, GpuBindGroupLayout, GpuBindGroupLayoutDescriptor,
+    GpuBindGroupLayoutEntry, GpuBuffer, GpuBufferBindingLayout, GpuBufferBindingType,
+    GpuBufferDescriptor, GpuCanvasContext, GpuColorTargetState, GpuComputePassEncoder,
+    GpuComputePipeline, GpuDevice, GpuExtent3D, GpuFragmentState, GpuImageCopyTexture,
+    GpuImageDataLayout, GpuPipelineLayoutDescriptor, GpuRenderPassDescriptor, GpuRenderPipeline,
+    GpuSampler, GpuSamplerDescriptor, GpuShaderModuleDescriptor, GpuShaderStage, GpuTexture,
+    GpuTextureDescriptor, GpuTextureFormat, GpuTextureUsage,
 };
 use crate::{log, FlexEngine};
 use js_sys::{Object, Promise, Reflect};
@@ -72,6 +72,9 @@ pub struct FlexRenderer {
     hit_test_readback_in_progress: Rc<std::cell::Cell<bool>>,
     readback_in_progress: Rc<std::cell::Cell<bool>>,
     panic_readback_in_progress: Rc<std::cell::Cell<bool>>,
+    viewport_width_css: f32,
+    viewport_height_css: f32,
+    viewport_dpr: f32,
 }
 
 #[wasm_bindgen]
@@ -146,6 +149,31 @@ impl FlexRenderer {
             hit_test_readback_in_progress: Rc::new(std::cell::Cell::new(false)),
             readback_in_progress: Rc::new(std::cell::Cell::new(false)),
             panic_readback_in_progress: Rc::new(std::cell::Cell::new(false)),
+            viewport_width_css: 0.0,
+            viewport_height_css: 0.0,
+            viewport_dpr: 0.0,
+        }
+    }
+
+    fn sync_viewport_state(&mut self, mark_dirty_on_change: bool) {
+        let canvas = self.context.canvas();
+        let viewport = sync_canvas_to_viewport(&canvas, 0.0);
+        let width = viewport.get(0).as_f64().unwrap_or(1.0).max(1.0) as f32;
+        let height = viewport.get(1).as_f64().unwrap_or(1.0).max(1.0) as f32;
+        let dpr = viewport.get(2).as_f64().unwrap_or(1.0).max(1.0) as f32;
+
+        let viewport_changed = (self.viewport_width_css - width).abs() > f32::EPSILON
+            || (self.viewport_height_css - height).abs() > f32::EPSILON
+            || (self.viewport_dpr - dpr).abs() > f32::EPSILON;
+
+        self.viewport_width_css = width;
+        self.viewport_height_css = height;
+        self.viewport_dpr = dpr;
+
+        let mut engine = self.engine.borrow_mut();
+        engine.device_pixel_ratio = dpr;
+        if mark_dirty_on_change && viewport_changed {
+            engine.mark_dirty();
         }
     }
 }
@@ -694,21 +722,24 @@ impl FlexRenderer {
 
         // log("Rust Renderer Init Complete");
         drop(engine);
+        self.sync_viewport_state(false);
         self.engine.borrow_mut().mark_dirty();
         Ok(())
     }
 
-    pub fn render(&mut self) {
-        let window_value = get_window().unwrap();
-        let dpr = window_value.device_pixel_ratio();
+    pub fn sync_viewport(&mut self) {
+        self.sync_viewport_state(true);
+    }
 
-        {
-            let mut engine = self.engine.borrow_mut();
-            engine.device_pixel_ratio = dpr as f32;
+    pub fn render(&mut self) {
+        if self.viewport_width_css <= 0.0 || self.viewport_height_css <= 0.0 || self.viewport_dpr <= 0.0 {
+            self.sync_viewport_state(false);
         }
 
+        let width = self.viewport_width_css.max(1.0);
+        let height = self.viewport_height_css.max(1.0);
+
         if !self.engine.borrow().is_dirty() {
-            // log("Render: skipping, no dirty");
             return;
         }
 
@@ -726,10 +757,6 @@ impl FlexRenderer {
             // log("Render: skipping, no buffers");
             return;
         }
-
-        let canvas: HtmlCanvasElement = self.context.canvas();
-        let width = canvas.width() as f32 / dpr as f32;
-        let height = canvas.height() as f32 / dpr as f32;
 
         let uniform_bytes: Vec<u8> = {
             let engine = self.engine.borrow();

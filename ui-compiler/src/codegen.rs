@@ -456,9 +456,18 @@ fn apply_attributes(mut builder: TokenStream, attributes: &[Attribute]) -> Token
                 let val = &attr.value;
                 builder = quote! { #builder.image(#val) };
             }
-            "data" | "d" => {
-                let val = &attr.value;
-                builder = quote! { #builder.path(#val) };
+            "data" | "d" | ":data" | ":d" => {
+                if attr.is_dynamic || attr.name.starts_with(':') {
+                    let expr: syn::Expr = syn::parse_str(&attr.value)
+                        .unwrap_or_else(|_| syn::parse_str("\"\".to_string()").unwrap());
+                    builder = quote! { #builder.bind_path(create_memo({
+                        let val = #expr.clone();
+                        move || val.to_reactive_string()
+                    })) };
+                } else {
+                    let val = &attr.value;
+                    builder = quote! { #builder.path(#val) };
+                }
             }
             "type" => {
                 let val = &attr.value;

@@ -214,4 +214,46 @@ mod tests {
             // but for now, this confirms the CPU-side data flow is correct.
         }
     }
+
+    #[test]
+    fn test_viewport_unit_serialization() {
+        use crate::ui::div;
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        let engine = Rc::new(RefCell::new(FlexEngine::new()));
+        let width_value = 73.25f32;
+        let height_value = 41.5f32;
+
+        {
+            let mut decls = HashMap::new();
+            decls.insert("width".to_string(), StyleValue::Vw(width_value));
+            decls.insert("height".to_string(), StyleValue::Vh(height_value));
+            engine
+                .borrow_mut()
+                .add_style_rule(".viewport-size".to_string(), decls);
+        }
+
+        div().class("viewport-size").build(engine.clone(), None);
+        engine.borrow_mut().render();
+
+        let class_defs = engine.borrow().class_defs.clone();
+        let mut width_unit: Option<u32> = None;
+        let mut height_unit: Option<u32> = None;
+        let width_bits = width_value.to_bits();
+        let height_bits = height_value.to_bits();
+
+        for pair in class_defs.windows(2) {
+            if pair[0] == width_bits {
+                width_unit = Some(pair[1]);
+            }
+            if pair[0] == height_bits {
+                height_unit = Some(pair[1]);
+            }
+        }
+
+        assert_eq!(width_unit, Some(5), "vw should serialize with UNIT_VW=5");
+        assert_eq!(height_unit, Some(4), "vh should serialize with UNIT_VH=4");
+    }
 }
