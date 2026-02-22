@@ -32,6 +32,9 @@ pub struct Element {
     flags_signal: Option<ReadSignal<u32>>,
 
     on_click: Option<Rc<dyn Fn(crate::UiEvent)>>,
+    on_mouse_down: Option<Rc<dyn Fn(crate::UiEvent)>>,
+    on_mouse_up: Option<Rc<dyn Fn(crate::UiEvent)>>,
+    on_mouse_move: Option<Rc<dyn Fn(crate::UiEvent)>>,
     on_mouse_enter: Option<Rc<dyn Fn(crate::UiEvent)>>,
     on_mouse_leave: Option<Rc<dyn Fn(crate::UiEvent)>>,
     classes: Vec<String>,
@@ -53,6 +56,9 @@ impl Element {
             path_signal: None,
             flags_signal: None,
             on_click: None,
+            on_mouse_down: None,
+            on_mouse_up: None,
+            on_mouse_move: None,
             on_mouse_enter: None,
             on_mouse_leave: None,
             classes: Vec::new(),
@@ -126,6 +132,18 @@ impl Element {
     }
     pub fn on_click<F: Fn(crate::UiEvent) + 'static>(mut self, f: F) -> Self {
         self.on_click = Some(Rc::new(f));
+        self
+    }
+    pub fn on_mouse_down<F: Fn(crate::UiEvent) + 'static>(mut self, f: F) -> Self {
+        self.on_mouse_down = Some(Rc::new(f));
+        self
+    }
+    pub fn on_mouse_up<F: Fn(crate::UiEvent) + 'static>(mut self, f: F) -> Self {
+        self.on_mouse_up = Some(Rc::new(f));
+        self
+    }
+    pub fn on_mouse_move<F: Fn(crate::UiEvent) + 'static>(mut self, f: F) -> Self {
+        self.on_mouse_move = Some(Rc::new(f));
         self
     }
     pub fn on_mouse_enter<F: Fn(crate::UiEvent) + 'static>(mut self, f: F) -> Self {
@@ -203,6 +221,15 @@ impl Element {
             }
             if let Some(f) = self.on_click {
                 node.on_click = Some(f);
+            }
+            if let Some(f) = self.on_mouse_down {
+                node.on_mouse_down = Some(f);
+            }
+            if let Some(f) = self.on_mouse_up {
+                node.on_mouse_up = Some(f);
+            }
+            if let Some(f) = self.on_mouse_move {
+                node.on_mouse_move = Some(f);
             }
             if let Some(f) = self.on_mouse_enter {
                 node.on_mouse_enter = Some(f);

@@ -74,22 +74,45 @@ async function run() {
     window.addEventListener('resize', syncViewportAndRender);
     window.visualViewport?.addEventListener('resize', syncViewportAndRender);
 
-    canvas.addEventListener('mousedown', async (e) => {
+    canvas.addEventListener('pointerdown', async (e) => {
         if (!renderer) return;
+        if (e.button !== 0) return;
         const rect = canvas.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        console.log(`Click at (UI pixels): ${x}, ${y}`);
-        await renderer.handle_click(x, y);
+        canvas.setPointerCapture(e.pointerId);
+        await renderer.handle_mousedown(x, y);
     });
 
-    canvas.addEventListener('mousemove', (e) => {
+    canvas.addEventListener('pointermove', (e) => {
         if (renderer) {
             const rect = canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             renderer.handle_mousemove(x, y);
+        }
+    });
+
+    canvas.addEventListener('pointerup', async (e) => {
+        if (!renderer) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        await renderer.handle_mouseup(x, y);
+        if (canvas.hasPointerCapture(e.pointerId)) {
+            canvas.releasePointerCapture(e.pointerId);
+        }
+    });
+
+    canvas.addEventListener('pointercancel', async (e) => {
+        if (!renderer) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        await renderer.handle_mouseup(x, y);
+        if (canvas.hasPointerCapture(e.pointerId)) {
+            canvas.releasePointerCapture(e.pointerId);
         }
     });
 

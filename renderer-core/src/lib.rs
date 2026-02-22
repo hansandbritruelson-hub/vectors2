@@ -736,6 +736,9 @@ pub struct CpuNode {
 
     // Events
     pub on_click: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+    pub on_mouse_down: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+    pub on_mouse_up: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
+    pub on_mouse_move: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
     pub on_mouse_enter: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
     pub on_mouse_leave: Option<std::rc::Rc<dyn Fn(UiEvent)>>,
 
@@ -779,6 +782,9 @@ impl CpuNode {
             inline_styles: HashMap::new(),
             cached_texture: None,
             on_click: None,
+            on_mouse_down: None,
+            on_mouse_up: None,
+            on_mouse_move: None,
             on_mouse_enter: None,
             on_mouse_leave: None,
             input_type: None,
@@ -883,6 +889,16 @@ pub struct FlexEngine {
     pub focused_node: Option<u32>,
     pub mouse_x: f32,
     pub mouse_y: f32,
+    #[wasm_bindgen(skip)]
+    pub mouse_down: bool,
+    #[wasm_bindgen(skip)]
+    pub mouse_down_x: f32,
+    #[wasm_bindgen(skip)]
+    pub mouse_down_y: f32,
+    #[wasm_bindgen(skip)]
+    pub pressed_target: Option<usize>,
+    #[wasm_bindgen(skip)]
+    pub mouse_capture_target: Option<usize>,
     pub dirty: bool,
     pub device_pixel_ratio: f32,
 }
@@ -930,6 +946,11 @@ impl FlexEngine {
             focused_node: None,
             mouse_x: 0.0,
             mouse_y: 0.0,
+            mouse_down: false,
+            mouse_down_x: 0.0,
+            mouse_down_y: 0.0,
+            pressed_target: None,
+            mouse_capture_target: None,
             hit_test_nodes: Vec::new(),
             dirty: false, // Start clean, mark_dirty will be called during build_ui
             device_pixel_ratio: dpr,
@@ -2791,6 +2812,45 @@ impl FlexEngine {
 
 // --- Internal Methods (Not exposed to JS) ---
 impl FlexEngine {
+    fn dispatch_bubbled_mouse_event(
+        &mut self,
+        event_type: &str,
+        initial_cpu_idx: usize,
+        x: f32,
+        y: f32,
+    ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
+        let mut callbacks = Vec::new();
+        let mut current_cpu_idx = Some(initial_cpu_idx);
+
+        while let Some(cpu_idx) = current_cpu_idx {
+            let Some(node) = self.cpu_nodes.get(cpu_idx) else {
+                break;
+            };
+
+            let cb_opt = match event_type {
+                "mousedown" => node.on_mouse_down.clone(),
+                "mouseup" => node.on_mouse_up.clone(),
+                "mousemove" => node.on_mouse_move.clone(),
+                "click" => node.on_click.clone(),
+                _ => None,
+            };
+
+            if let Some(cb) = cb_opt {
+                let event = self.build_ui_event(event_type, initial_cpu_idx, cpu_idx, x, y);
+                callbacks.push((cb, event));
+                break;
+            }
+
+            if event_type == "click" && node.input_type.is_some() {
+                self.focused_node = Some(cpu_idx as u32);
+            }
+
+            current_cpu_idx = node.parent;
+        }
+
+        callbacks
+    }
+
     fn event_target_snapshot(&self, node_idx: usize) -> UiEventTarget {
         let fallback = UiEventTarget {
             id: node_idx as u32,
@@ -2952,10 +3012,82 @@ impl FlexEngine {
         callbacks
     }
 
-    pub fn handle_mousemove(&mut self, x: f32, y: f32) {
+    pub fn handle_mousedown(
+        &mut self,
+        x: f32,
+        y: f32,
+    ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
+        self.mouse_x = x;
+        self.mouse_y = y;
+        self.mouse_down = true;
+        self.mouse_down_x = x;
+        self.mouse_down_y = y;
+
+        let target_cpu_idx = self
+            .hovered_target_from_gpu()
+            .or_else(|| self.target_from_point_snapshot(x, y));
+
+        self.pressed_target = target_cpu_idx;
+        self.mouse_capture_target = target_cpu_idx;
+
+        if let Some(initial_cpu_idx) = target_cpu_idx {
+            return self.dispatch_bubbled_mouse_event("mousedown", initial_cpu_idx, x, y);
+        }
+
+        Vec::new()
+    }
+
+    pub fn handle_mousemove(
+        &mut self,
+        x: f32,
+        y: f32,
+    ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
         self.mouse_x = x;
         self.mouse_y = y;
         self.mark_dirty();
+        if let Some(captured_idx) = self.mouse_capture_target {
+            if captured_idx < self.cpu_nodes.len() {
+                return self.dispatch_bubbled_mouse_event("mousemove", captured_idx, x, y);
+            }
+        }
+        Vec::new()
+    }
+
+    pub fn handle_mouseup(
+        &mut self,
+        x: f32,
+        y: f32,
+    ) -> Vec<(std::rc::Rc<dyn Fn(UiEvent)>, UiEvent)> {
+        self.mouse_x = x;
+        self.mouse_y = y;
+        self.mark_dirty();
+
+        let mut callbacks = Vec::new();
+        let event_target = self
+            .mouse_capture_target
+            .or_else(|| self.hovered_target_from_gpu())
+            .or_else(|| self.target_from_point_snapshot(x, y));
+
+        if let Some(initial_cpu_idx) = event_target {
+            callbacks.extend(self.dispatch_bubbled_mouse_event("mouseup", initial_cpu_idx, x, y));
+        }
+
+        let moved_dx = x - self.mouse_down_x;
+        let moved_dy = y - self.mouse_down_y;
+        let moved_far = (moved_dx * moved_dx) + (moved_dy * moved_dy) > (4.0 * 4.0);
+
+        if !moved_far {
+            if let (Some(pressed_idx), Some(up_idx)) = (self.pressed_target, event_target) {
+                if pressed_idx == up_idx {
+                    callbacks.extend(self.dispatch_bubbled_mouse_event("click", up_idx, x, y));
+                }
+            }
+        }
+
+        self.mouse_down = false;
+        self.pressed_target = None;
+        self.mouse_capture_target = None;
+        callbacks
     }
 
     pub fn process_hover_from_gpu_readback(

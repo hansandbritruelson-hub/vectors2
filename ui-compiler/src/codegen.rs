@@ -934,6 +934,18 @@ fn apply_attributes(mut builder: TokenStream, attributes: &[Attribute]) -> Token
                 let handler = parse_event_handler(&attr.value);
                 builder = quote! { #builder.on_click(#handler) };
             }
+            "@mousedown" => {
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_mouse_down(#handler) };
+            }
+            "@mouseup" => {
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_mouse_up(#handler) };
+            }
+            "@mousemove" => {
+                let handler = parse_event_handler(&attr.value);
+                builder = quote! { #builder.on_mouse_move(#handler) };
+            }
             "@mouseenter" => {
                 let handler = parse_event_handler(&attr.value);
                 builder = quote! { #builder.on_mouse_enter(#handler) };

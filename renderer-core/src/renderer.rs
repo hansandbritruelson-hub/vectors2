@@ -1597,8 +1597,27 @@ impl FlexRenderer {
         Promise::resolve(&JsValue::UNDEFINED)
     }
 
+    pub fn handle_mousedown(&self, x: f32, y: f32) -> Promise {
+        let callbacks = self.engine.borrow_mut().handle_mousedown(x, y);
+        for (cb, event) in callbacks {
+            cb(event);
+        }
+        Promise::resolve(&JsValue::UNDEFINED)
+    }
+
+    pub fn handle_mouseup(&self, x: f32, y: f32) -> Promise {
+        let callbacks = self.engine.borrow_mut().handle_mouseup(x, y);
+        for (cb, event) in callbacks {
+            cb(event);
+        }
+        Promise::resolve(&JsValue::UNDEFINED)
+    }
+
     pub fn handle_mousemove(&self, x: f32, y: f32) {
-        self.engine.borrow_mut().handle_mousemove(x, y);
+        let callbacks = self.engine.borrow_mut().handle_mousemove(x, y);
+        for (cb, event) in callbacks {
+            cb(event);
+        }
     }
 
     pub fn handle_keydown(&self, key: String) {
